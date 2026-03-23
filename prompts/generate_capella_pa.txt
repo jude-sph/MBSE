@@ -1,0 +1,80 @@
+You are an expert systems engineer using the Arcadia/Capella methodology. Your task is to generate a Capella Physical Architecture (PA) layer from a set of system requirements.
+
+The Physical Architecture deploys logical components onto real hardware nodes and defines the physical links between them. This is where technology choices are made.
+
+Key Arcadia PA concepts:
+- Physical Components (PC): Actual hardware or software units installed on the vessel (e.g., DGPS Receiver Unit, VHF/MF Radio Unit, DP Control Computer, Davit Control Panel, Ice Radar Unit)
+- Physical Functions (PF): Functions physically hosted on a specific component
+- Physical Links (PL): Cables, buses, or network connections between physical components (e.g., NMEA 0183 bus, Ethernet link, RS-422 serial link)
+
+For a PIB Icebreaker typical physical components include: DGPS/GNSS Receiver, DP Control System Computer, Thruster Control Units, VHF/DSC Radio, MF Radio, GMDSS Console, Davit Hydraulic Control, FRC Launch Equipment, Ice Radar/AIS Display.
+
+Physical component types: "HW_Node" (hardware unit), "SW_Component" (software), "Network" (data network/bus).
+
+---
+
+INPUT
+
+The following requirements are provided as a JSON array:
+
+{requirements}
+
+---
+
+EXAMPLE OUTPUT SCHEMA
+
+{{
+  "components": [
+    {{
+      "id": "PC-001",
+      "name": "DGPS/GNSS Receiver",
+      "type": "HW_Node",
+      "logical_components": ["LC-001"]
+    }},
+    {{
+      "id": "PC-002",
+      "name": "DP Control System Computer",
+      "type": "HW_Node",
+      "logical_components": ["LC-001"]
+    }},
+    {{
+      "id": "PC-003",
+      "name": "GMDSS Console",
+      "type": "HW_Node",
+      "logical_components": ["LC-002"]
+    }}
+  ],
+  "functions": [
+    {{
+      "id": "PF-001",
+      "name": "Acquire GNSS Position Fix",
+      "physical_component": "PC-001"
+    }},
+    {{
+      "id": "PF-002",
+      "name": "Run DP Station-Keeping Algorithm",
+      "physical_component": "PC-002"
+    }}
+  ],
+  "links": [
+    {{
+      "id": "PL-001",
+      "name": "NMEA 0183 Position Bus",
+      "source": "PC-001",
+      "target": "PC-002"
+    }}
+  ]
+}}
+
+---
+
+OUTPUT
+
+Generate a JSON object matching the schema above, derived from the provided requirements. Return ONLY the JSON object with no additional explanation, preamble, or markdown formatting.
+
+Rules:
+1. Every physical component referenced in functions or links MUST exist in the components list.
+2. Component IDs follow PC-NNN, function IDs follow PF-NNN, link IDs follow PL-NNN.
+3. The "logical_components" field references IDs from the Logical Architecture (use LC-NNN format).
+4. The "type" field must be one of: "HW_Node", "SW_Component", "Network".
+5. Define physical links for all data and control flows identified in the requirements.

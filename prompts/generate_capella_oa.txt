@@ -1,0 +1,90 @@
+You are an expert systems engineer using the Arcadia/Capella methodology. Your task is to generate a Capella Operational Analysis (OA) layer from a set of system requirements.
+
+The Operational Analysis models the real-world operational context BEFORE any technical solution is defined. You are modelling the mission and the stakeholders, NOT the ship hardware.
+
+Key Arcadia OA concepts:
+- Operational Entities (OE): Real-world organisations, systems, or roles involved in the mission (e.g., PIB Icebreaker, JRCC Halifax, MCTS, Distressed Vessel, Transport Canada, Marine Environment)
+- Operational Capabilities (OC): What the collective system of entities can achieve together (e.g., Conduct SAR, Escort Commercial Shipping, Perform Harbour Breakout)
+- Operational Scenarios (OS): Message-sequence exchanges between entities showing how they collaborate on a mission
+- Operational Activities (OA): Specific things each entity does to fulfil its role, with inputs and outputs
+
+Reference domain: Canadian SAR icebreaker operations. The PIB Icebreaker (e.g., CCGS Pierre Radisson) operates under the command of JRCC (Joint Rescue Coordination Centre) and MCTS (Marine Communications and Traffic Services) to conduct Search and Rescue, escort shipping, and perform harbour breakouts in ice-constrained waters.
+
+---
+
+INPUT
+
+The following requirements are provided as a JSON array:
+
+{requirements}
+
+---
+
+EXAMPLE OUTPUT SCHEMA
+
+{{
+  "entities": [
+    {{
+      "id": "OE-001",
+      "name": "PIB Icebreaker",
+      "type": "OperationalEntity",
+      "actors": ["Commanding Officer", "Navigation Officer"]
+    }},
+    {{
+      "id": "OE-002",
+      "name": "JRCC Halifax",
+      "type": "OperationalEntity",
+      "actors": ["SAR Coordinator"]
+    }}
+  ],
+  "capabilities": [
+    {{
+      "id": "OC-001",
+      "name": "Conduct SAR",
+      "involved_entities": ["OE-001", "OE-002"]
+    }}
+  ],
+  "scenarios": [
+    {{
+      "id": "OS-001",
+      "name": "SAR Tasking and Response",
+      "steps": [
+        {{
+          "from_entity": "OE-002",
+          "to_entity": "OE-001",
+          "message": "SAR Tasking Order",
+          "sequence": 1
+        }},
+        {{
+          "from_entity": "OE-001",
+          "to_entity": "OE-002",
+          "message": "Vessel On Scene Report",
+          "sequence": 2
+        }}
+      ]
+    }}
+  ],
+  "activities": [
+    {{
+      "id": "OA-001",
+      "name": "Monitor GMDSS Frequencies",
+      "entity": "OE-001",
+      "inputs": ["Radio Signal"],
+      "outputs": ["Distress Alert"]
+    }}
+  ]
+}}
+
+---
+
+OUTPUT
+
+Generate a JSON object matching the schema above, derived from the provided requirements. Return ONLY the JSON object with no additional explanation, preamble, or markdown formatting.
+
+Rules:
+1. Every entity referenced in capabilities, scenarios, or activities MUST exist in the entities list.
+2. Entity IDs must be unique and follow the pattern OE-NNN (zero-padded three digits).
+3. Capability IDs follow OC-NNN, scenario IDs follow OS-NNN, activity IDs follow OA-NNN.
+4. Derive entities, capabilities, and activities directly from the requirements provided.
+5. Include at least one scenario that shows the end-to-end operational flow.
+6. The PIB Icebreaker should appear as an entity if the requirements relate to vessel operations.
