@@ -76,8 +76,17 @@ document.addEventListener('DOMContentLoaded', function () {
     // Check for updates quietly on page load
     checkUpdatesQuietly();
 
-    // Initialize chat resize
+    // Initialize chat resize + example prompts
     initChatResize();
+    document.querySelectorAll('.chat-example').forEach(function(ex) {
+        ex.addEventListener('click', function() {
+            var input = document.getElementById('chat-input');
+            if (input) {
+                input.value = ex.textContent.replace(/^"|"$/g, '');
+                input.focus();
+            }
+        });
+    });
 
     // Project-based restore
     if (INITIAL_PROJECT && INITIAL_PROJECT.project) {
@@ -1525,6 +1534,10 @@ async function sendChat() {
 
 function appendChatMessage(role, text, isLoading) {
     var history = document.getElementById('chat-history');
+    // Remove welcome message on first real message
+    var welcome = history.querySelector('.chat-welcome');
+    if (welcome) welcome.remove();
+
     var wrapper = el('div', {
         className: 'chat-message chat-' + role + (isLoading ? ' chat-loading' : ''),
     });
