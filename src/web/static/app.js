@@ -1476,8 +1476,8 @@ function toggleChat() {
 }
 
 async function sendChat() {
-    if (!currentJobId) {
-        showToast('No active job. Generate a model first.', 'error');
+    if (!currentModel || !currentModel.layers || Object.keys(currentModel.layers).length === 0) {
+        showToast('No model data yet. Add a batch first.', 'error');
         return;
     }
 
@@ -1495,7 +1495,7 @@ async function sendChat() {
     var loadingEl = appendChatMessage('agent', '\u2026', true);
 
     try {
-        var res = await fetch('/job/' + currentJobId + '/chat', {
+        var res = await fetch('/project/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: message }),
