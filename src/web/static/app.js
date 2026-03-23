@@ -108,15 +108,28 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    // Project name editing
-    document.getElementById('project-name').addEventListener('blur', async function() {
-        var newName = this.textContent.trim();
+    // Project name editing -- single line, auto-save with indicator
+    var projectNameEl = document.getElementById('project-name');
+    projectNameEl.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            this.blur();
+        }
+    });
+    projectNameEl.addEventListener('paste', function(e) {
+        e.preventDefault();
+        var text = (e.clipboardData || window.clipboardData).getData('text/plain').replace(/\n/g, ' ').trim();
+        document.execCommand('insertText', false, text);
+    });
+    projectNameEl.addEventListener('blur', async function() {
+        var newName = this.textContent.replace(/\n/g, ' ').trim();
         if (newName && currentModel) {
             await fetch('/project/rename', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({name: newName}),
             });
+            showSaveIndicator();
         }
     });
 
@@ -716,6 +729,7 @@ async function fetchAndDisplayModel(jobId) {
         renderCoverageIndicator();
         switchTab('tree');
         updateProjectUI();
+        showSaveIndicator();
         showToast('Model generated successfully!', 'success');
     } catch (e) {
         showToast('Failed to load model: ' + e.message, 'error');
@@ -1514,6 +1528,7 @@ async function sendChat() {
                 currentModel = data.model;
                 renderTree();
                 renderCoverageIndicator();
+                showSaveIndicator();
                 var activeTab = document.querySelector('.tab-btn.active');
                 if (activeTab) {
                     var tabName = activeTab.getAttribute('data-tab');
@@ -2010,6 +2025,18 @@ function _stopAllTimers() {
         clearInterval(_elapsedInterval);
         _elapsedInterval = null;
     }
+}
+
+function showSaveIndicator() {
+    var modifiedEl = document.getElementById('project-modified');
+    if (!modifiedEl) return;
+    modifiedEl.textContent = 'Saved';
+    modifiedEl.classList.add('save-flash');
+    setTimeout(function() {
+        var d = new Date();
+        modifiedEl.textContent = 'Saved ' + d.toLocaleTimeString();
+        modifiedEl.classList.remove('save-flash');
+    }, 1500);
 }
 
 function showToast(message, type) {
