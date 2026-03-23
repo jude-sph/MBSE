@@ -131,6 +131,10 @@ Existing projects with `system_analysis` layer key must still work. Two places n
 
 - `generate.py` PROMPT_MAP: add `("capella", "system_analysis")` pointing to the same prompt
 - `project.py` or `pipeline.py`: when loading a project, map `system_analysis` → `system_needs_analysis` in the layers dict
+- `agent/tools.py`: update the `add_element` tool description which hardcodes `'system_analysis'` as an example layer key -- change to `'system_needs_analysis'`
+- `exporter.py`: add `"system_needs_analysis": "System Needs Analysis"` to `_LAYER_DISPLAY_NAMES`
+- `instruct_capella.txt`: update the valid layer enumeration to include `epbs` and replace `system_analysis` with `system_needs_analysis`
+- `tests/test_pipeline.py`: existing test uses `system_analysis` which will work via backward compat alias, but update to `system_needs_analysis` for clarity
 
 ### 4. Prompt Templates
 
