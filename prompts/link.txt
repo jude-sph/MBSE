@@ -34,10 +34,11 @@ TRACEABILITY RULES
 
 1. Requirements → Activities/Functions: Every requirement should be satisfied by at least one operational activity, system function, or logical/physical component.
 2. Activities → Components: Operational activities should be realized by system functions, which are in turn implemented by logical or physical components.
-3. Use only the valid link types listed above for this mode. Do not invent new link types.
-4. Each link must reference IDs that exist in either the requirements list or the model layers above.
-5. Assign sequential IDs following the pattern LNK-NNN (zero-padded three digits).
-6. Provide a concise description for each link explaining the relationship.
+3. Cross-stage links are explicitly supported: a Physical component can `realizes` a Logical component; a Logical function can `realizes` a System function; a Physical function can `implements` a Logical function; a function can be `allocates` to a component regardless of layer; any two elements across stages can be connected with `traces` for general traceability; elements communicate through exchanges using `communicates` when a communication means is involved.
+4. Use only the valid link types listed above for this mode. Do not invent new link types.
+5. Each link must reference IDs that exist in either the requirements list or the model layers above.
+6. Assign sequential IDs following the pattern LNK-NNN (zero-padded three digits).
+7. Provide a concise description for each link explaining the relationship.
 
 ---
 
