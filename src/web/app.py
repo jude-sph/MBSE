@@ -45,6 +45,21 @@ jobs: dict[str, "Job"] = {}
 parsed_requirements: list[Requirement] = []
 current_project: ProjectModel | None = load_project()
 
+# Undo/Redo stacks (Feature 1)
+_undo_stack: list[str] = []
+_redo_stack: list[str] = []
+MAX_UNDO = 20
+
+
+def _push_undo():
+    """Save current state to undo stack before a mutation."""
+    global _undo_stack, _redo_stack
+    if current_project:
+        _undo_stack.append(current_project.model_dump_json())
+        if len(_undo_stack) > MAX_UNDO:
+            _undo_stack.pop(0)
+        _redo_stack.clear()
+
 from src.config import MODEL_CATALOGUE, CAPELLA_LAYERS, RHAPSODY_DIAGRAMS
 
 
@@ -368,6 +383,7 @@ async def _run_job_async(job: Job):
             return
 
         # Merge batch result into the project
+        _push_undo()
         total_cost = batch_result.meta.cost.total_cost_usd if batch_result.meta.cost else 0
         merge_batch_into_project(
             current_project,
@@ -449,6 +465,7 @@ async def edit_job(job_id: str, request: Request):
     if not tool_name:
         raise HTTPException(400, "Missing 'tool_name' in request body")
 
+    _push_undo()
     result = apply_tool(job.model, tool_name, arguments)
     if current_project:
         save_project(current_project)
@@ -459,7 +476,10 @@ async def edit_job(job_id: str, request: Request):
 # POST /project/chat — Chat with agent using the current project model
 # ---------------------------------------------------------------------------
 
+# Initialize chat history from loaded project (Feature 6)
 _project_chat_history: list[dict] = []
+if current_project and current_project.chat_history:
+    _project_chat_history = list(current_project.chat_history)
 
 @app.post("/project/chat")
 async def chat_project(request: Request):
@@ -475,6 +495,7 @@ async def chat_project(request: Request):
     if not message:
         raise HTTPException(400, "Missing 'message' in request body")
 
+    _push_undo()
     tracker = CostTracker(model=config.MODEL)
     response_text, updated_history = chat_with_agent(
         model=current_project,
@@ -483,6 +504,8 @@ async def chat_project(request: Request):
         tracker=tracker,
     )
     _project_chat_history = updated_history
+    # Persist chat history to project (Feature 6)
+    current_project.chat_history = _project_chat_history
     save_project(current_project)
 
     return {
@@ -786,6 +809,162 @@ async def cost_history():
         "total_spend": round(total_spend, 6),
         "avg_per_run": round(avg_per_run, 6),
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /project/undo  (Feature 1)
+# ---------------------------------------------------------------------------
+
+@app.post("/project/undo")
+async def undo_project():
+    global current_project, _undo_stack, _redo_stack
+    if not _undo_stack:
+        raise HTTPException(400, "Nothing to undo")
+    # Save current state to redo stack
+    if current_project:
+        _redo_stack.append(current_project.model_dump_json())
+    snapshot = _undo_stack.pop()
+    current_project = ProjectModel.model_validate_json(snapshot)
+    save_project(current_project)
+    return json.loads(current_project.model_dump_json())
+
+
+# ---------------------------------------------------------------------------
+# POST /project/redo  (Feature 1)
+# ---------------------------------------------------------------------------
+
+@app.post("/project/redo")
+async def redo_project():
+    global current_project, _undo_stack, _redo_stack
+    if not _redo_stack:
+        raise HTTPException(400, "Nothing to redo")
+    # Save current state to undo stack
+    if current_project:
+        _undo_stack.append(current_project.model_dump_json())
+    snapshot = _redo_stack.pop()
+    current_project = ProjectModel.model_validate_json(snapshot)
+    save_project(current_project)
+    return json.loads(current_project.model_dump_json())
+
+
+# ---------------------------------------------------------------------------
+# POST /project/save  (Feature 7)
+# ---------------------------------------------------------------------------
+
+@app.post("/project/save")
+async def force_save():
+    if not current_project:
+        raise HTTPException(400, "No active project")
+    save_project(current_project)
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# POST /project/chat/clear  (Feature 6)
+# ---------------------------------------------------------------------------
+
+@app.post("/project/chat/clear")
+async def clear_chat():
+    global _project_chat_history
+    _project_chat_history = []
+    if current_project:
+        current_project.chat_history = []
+        save_project(current_project)
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# POST /project/retry-instructions  (Feature 3)
+# ---------------------------------------------------------------------------
+
+@app.post("/project/retry-instructions")
+async def retry_instructions():
+    global current_project
+    if not current_project:
+        raise HTTPException(400, "No active project")
+    if not current_project.layers:
+        raise HTTPException(400, "Project has no layers. Generate a model first.")
+
+    from src.stages.instruct import generate_instructions
+    from src.llm_client import create_client
+
+    tracker = CostTracker(model=config.MODEL)
+    client = create_client()
+    mode = current_project.meta.mode
+
+    try:
+        instructions = generate_instructions(
+            mode, {"layers": current_project.layers}, tracker, client=client
+        )
+        _push_undo()
+        current_project.instructions = instructions
+        save_project(current_project)
+        return json.loads(current_project.model_dump_json())
+    except Exception as exc:
+        raise HTTPException(500, f"Retry failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# GET /project/export/{fmt}  (Feature 5 — per-layer export)
+# ---------------------------------------------------------------------------
+
+@app.get("/project/export/{fmt}")
+async def export_project(fmt: str, request: Request):
+    if not current_project:
+        raise HTTPException(400, "No active project")
+
+    fmt = fmt.lower()
+    if fmt not in ("json", "xlsx", "text"):
+        raise HTTPException(400, f"Unsupported format '{fmt}'. Use json, xlsx, or text")
+
+    layers_param = request.query_params.get("layers", "")
+    selected_layers = [l.strip() for l in layers_param.split(",") if l.strip()] if layers_param else []
+
+    # Build a filtered copy if layers are specified
+    if selected_layers:
+        import copy
+        filtered = copy.deepcopy(current_project)
+        filtered.layers = {k: v for k, v in filtered.layers.items() if k in selected_layers}
+        model_to_export = filtered
+    else:
+        model_to_export = current_project
+
+    export_dir = config.OUTPUT_DIR / "exports"
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    source_stem = current_project.project.name.lower().replace(" ", "-") if current_project.project.name else "mbse"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M")
+    mode = current_project.meta.mode or "model"
+    ext = "txt" if fmt == "text" else fmt
+    filename = f"{source_stem}-{mode}-{timestamp}.{ext}"
+
+    if fmt == "json":
+        out_path = export_dir / f"project_export.json"
+        export_json(model_to_export, out_path)
+        return FileResponse(out_path, filename=filename, media_type="application/json")
+    elif fmt == "xlsx":
+        out_path = export_dir / f"project_export.xlsx"
+        export_xlsx(model_to_export, out_path)
+        return FileResponse(out_path, filename=filename, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    else:
+        out_path = export_dir / f"project_export.txt"
+        export_text(model_to_export, out_path)
+        return FileResponse(out_path, filename=filename, media_type="text/plain")
+
+
+# ---------------------------------------------------------------------------
+# GET /project/print  (Feature 5 — presentation / print view)
+# ---------------------------------------------------------------------------
+
+@app.get("/project/print", response_class=HTMLResponse)
+async def print_view(request: Request):
+    if not current_project:
+        raise HTTPException(400, "No active project")
+    data = json.loads(current_project.model_dump_json())
+    return templates.TemplateResponse("print.html", {
+        "request": request,
+        "project": data,
+    })
 
 
 # ---------------------------------------------------------------------------

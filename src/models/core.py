@@ -97,3 +97,4 @@ class ProjectModel(MBSEModel):
     """Extends MBSEModel with project metadata and batch history."""
     project: ProjectMeta = Field(default_factory=ProjectMeta)
     batches: list[BatchRecord] = Field(default_factory=list)
+    chat_history: list[dict] = Field(default_factory=list)

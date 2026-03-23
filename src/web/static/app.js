@@ -96,6 +96,11 @@ document.addEventListener('DOMContentLoaded', function () {
         renderCoverageIndicator();
         switchTab('tree');
         updateProjectUI();
+        populateExportLayerFilters();
+        // Feature 6: restore chat history
+        if (INITIAL_PROJECT.chat_history && INITIAL_PROJECT.chat_history.length > 0) {
+            restoreChatHistory(INITIAL_PROJECT.chat_history);
+        }
     } else {
         // No project yet — show empty state
         var treeContainer = document.getElementById('tab-tree');
@@ -729,6 +734,7 @@ async function fetchAndDisplayModel(jobId) {
         renderCoverageIndicator();
         switchTab('tree');
         updateProjectUI();
+        populateExportLayerFilters();
         showSaveIndicator();
         showToast('Model generated successfully!', 'success');
     } catch (e) {
@@ -979,10 +985,12 @@ function toggleElementDetails(row, elem) {
             var traceRow = el('div', { className: 'detail-trace-row' });
             if (link.source === elem.id) {
                 traceRow.textContent = '\u2192 ' + link.type + ' \u2192 ' + link.target;
+                addReqTooltip(traceRow, link.target);
             } else {
                 traceRow.textContent = '\u2190 ' + link.type + ' \u2190 ' + link.source;
+                addReqTooltip(traceRow, link.source);
             }
-            if (link.description) {
+            if (link.description && !traceRow.title) {
                 traceRow.title = link.description;
             }
             details.appendChild(traceRow);
@@ -1088,9 +1096,13 @@ function renderLinksTab() {
 
     currentModel.links.forEach(function (link) {
         var row = document.createElement('tr');
-        row.appendChild(el('td', { textContent: link.source }));
+        var sourceTd = el('td', { textContent: link.source });
+        addReqTooltip(sourceTd, link.source);
+        row.appendChild(sourceTd);
         row.appendChild(el('td', { className: 'link-type', textContent: link.type }));
-        row.appendChild(el('td', { textContent: link.target }));
+        var targetTd = el('td', { textContent: link.target });
+        addReqTooltip(targetTd, link.target);
+        row.appendChild(targetTd);
         tbody.appendChild(row);
     });
 }
@@ -1106,13 +1118,24 @@ function renderInstructionsTab() {
         return;
     }
 
+    // Feature 3: Show error state with retry button if instructions failed
+    if (currentModel.instructions.error) {
+        var errorDiv = el('div', {className: 'instructions-error'});
+        errorDiv.appendChild(el('span', {textContent: 'Instructions failed: ' + currentModel.instructions.error}));
+        var retryBtn = el('button', {className: 'btn-regen', textContent: 'Retry Instructions'});
+        retryBtn.addEventListener('click', function() { retryInstructions(); });
+        errorDiv.appendChild(retryBtn);
+        list.appendChild(errorDiv);
+    }
+
     var steps = currentModel.instructions.steps || [];
     var toolName = currentModel.instructions.tool || '';
 
-    if (steps.length === 0) {
+    if (steps.length === 0 && !currentModel.instructions.error) {
         list.appendChild(el('div', { className: 'empty-state', textContent: 'No steps generated.' }));
         return;
     }
+    if (steps.length === 0) return;
 
     // Header with tool name and copy-all button
     var header = el('div', { className: 'instructions-header' });
@@ -1636,17 +1659,15 @@ function clearSession() {
 function toggleExportMenu() {
     var menu = document.getElementById('export-menu');
     if (!menu) return;
+    if (menu.style.display === 'none') {
+        populateExportLayerFilters();
+    }
     menu.style.display = menu.style.display === 'none' ? '' : 'none';
 }
 
 function exportModel(format) {
-    if (!currentJobId) {
-        showToast('No active model to export.', 'error');
-        return;
-    }
-    var url = '/job/' + currentJobId + '/export/' + format;
-    window.open(url, '_blank');
-    document.getElementById('export-menu').style.display = 'none';
+    // Legacy fallback — delegates to exportProject for new per-layer export
+    exportProject(format);
 }
 
 // =============================================================================
@@ -2252,5 +2273,223 @@ function el(tag, attrs, children) {
 function clearChildren(node) {
     while (node.firstChild) {
         node.removeChild(node.firstChild);
+    }
+}
+
+// =============================================================================
+// 18. UNDO/REDO + CTRL+S (Features 1 & 7)
+// =============================================================================
+
+document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        performUndo();
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'Z' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        performRedo();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        forceSave();
+    }
+});
+
+async function performUndo() {
+    var res = await fetch('/project/undo', {method: 'POST'});
+    if (res.ok) {
+        var data = await res.json();
+        currentModel = data;
+        renderTree();
+        renderCoverageIndicator();
+        updateProjectUI();
+        showSaveIndicator();
+        showToast('Undone', 'info');
+    } else {
+        showToast('Nothing to undo', 'info');
+    }
+}
+
+async function performRedo() {
+    var res = await fetch('/project/redo', {method: 'POST'});
+    if (res.ok) {
+        var data = await res.json();
+        currentModel = data;
+        renderTree();
+        renderCoverageIndicator();
+        updateProjectUI();
+        showSaveIndicator();
+        showToast('Redone', 'info');
+    } else {
+        showToast('Nothing to redo', 'info');
+    }
+}
+
+async function forceSave() {
+    if (!currentModel) return;
+    var res = await fetch('/project/save', {method: 'POST'});
+    if (res.ok) {
+        showSaveIndicator();
+        showToast('Project saved', 'success');
+    }
+}
+
+// =============================================================================
+// 19. SEARCH ACROSS MODEL (Feature 2)
+// =============================================================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    var searchInput = document.getElementById('model-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            filterTree(this.value.trim().toLowerCase());
+        });
+    }
+});
+
+function filterTree(query) {
+    if (!query) {
+        // Show everything
+        document.querySelectorAll('.element-row, .collection-section, .layer-section').forEach(function(el) {
+            el.style.display = '';
+        });
+        return;
+    }
+    // Hide all elements first, then show matches
+    document.querySelectorAll('.element-row').forEach(function(row) {
+        var id = (row.querySelector('.element-id') || {}).textContent || '';
+        var name = (row.querySelector('.element-name') || {}).textContent || '';
+        var matches = id.toLowerCase().includes(query) || name.toLowerCase().includes(query);
+        row.style.display = matches ? '' : 'none';
+    });
+    // Hide empty collections
+    document.querySelectorAll('.collection-section').forEach(function(section) {
+        var visibleRows = section.querySelectorAll('.element-row:not([style*="display: none"])');
+        section.style.display = visibleRows.length > 0 ? '' : 'none';
+    });
+    // Hide empty layers
+    document.querySelectorAll('.layer-section').forEach(function(section) {
+        var visibleColls = section.querySelectorAll('.collection-section:not([style*="display: none"])');
+        section.style.display = visibleColls.length > 0 ? '' : 'none';
+    });
+}
+
+// =============================================================================
+// 20. REQUIREMENT TEXT TOOLTIP ON HOVER (Feature 4)
+// =============================================================================
+
+function addReqTooltip(element, reqId) {
+    if (!currentModel || !currentModel.requirements) return;
+    var req = currentModel.requirements.find(function(r) { return r.id === reqId; });
+    if (req) {
+        element.title = req.id + ': ' + req.text;
+        element.classList.add('has-tooltip');
+    }
+}
+
+// =============================================================================
+// 21. EXPORT PER LAYER + PRESENTATION VIEW (Feature 5)
+// =============================================================================
+
+function exportProject(format) {
+    if (!currentModel || !currentModel.layers) {
+        showToast('No active model to export.', 'error');
+        return;
+    }
+    // Read checked export layers
+    var checkedLayers = [];
+    document.querySelectorAll('#export-layer-filters input[type=checkbox]:checked').forEach(function(cb) {
+        checkedLayers.push(cb.value);
+    });
+    var queryStr = checkedLayers.length > 0 ? '?layers=' + checkedLayers.join(',') : '';
+    window.open('/project/export/' + format + queryStr, '_blank');
+    document.getElementById('export-menu').style.display = 'none';
+}
+
+function openPrintView() {
+    window.open('/project/print', '_blank');
+    document.getElementById('export-menu').style.display = 'none';
+}
+
+function populateExportLayerFilters() {
+    var container = document.getElementById('export-layer-filters');
+    if (!container) return;
+    clearChildren(container);
+    if (!currentModel || !currentModel.layers) return;
+
+    Object.keys(currentModel.layers).forEach(function(layerKey) {
+        var displayName = (CAPELLA_LAYERS && CAPELLA_LAYERS[layerKey]) ||
+                          (RHAPSODY_DIAGRAMS && RHAPSODY_DIAGRAMS[layerKey]) ||
+                          layerKey;
+        var label = document.createElement('label');
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = layerKey;
+        cb.checked = true;
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(' ' + displayName));
+        container.appendChild(label);
+    });
+}
+
+// =============================================================================
+// 22. CHAT HISTORY PERSISTENCE + CLEAR (Feature 6)
+// =============================================================================
+
+async function clearChatHistory() {
+    if (!confirm('Clear all chat history?')) return;
+    var res = await fetch('/project/chat/clear', {method: 'POST'});
+    if (res.ok) {
+        var history = document.getElementById('chat-history');
+        if (history) {
+            clearChildren(history);
+            // Restore welcome message
+            var welcome = el('div', {className: 'chat-welcome'});
+            welcome.appendChild(el('div', {className: 'chat-welcome-icon', textContent: '\u2672'}));
+            welcome.appendChild(el('div', {className: 'chat-welcome-title', textContent: 'MBSE Agent'}));
+            welcome.appendChild(el('div', {className: 'chat-welcome-text', textContent: 'Ask me to modify your model. I can add, rename, or remove elements, create links, regenerate layers, and more.'}));
+            history.appendChild(welcome);
+        }
+        showToast('Chat history cleared', 'info');
+    }
+}
+
+function restoreChatHistory(chatHistory) {
+    if (!chatHistory || !Array.isArray(chatHistory) || chatHistory.length === 0) return;
+    var history = document.getElementById('chat-history');
+    if (!history) return;
+    // Remove welcome
+    var welcome = history.querySelector('.chat-welcome');
+    if (welcome) welcome.remove();
+
+    chatHistory.forEach(function(msg) {
+        if (msg.role === 'user') {
+            appendChatMessage('user', msg.content || '');
+        } else if (msg.role === 'assistant' && msg.content) {
+            appendChatMessage('agent', msg.content);
+        }
+    });
+}
+
+// =============================================================================
+// 23. RETRY INSTRUCTIONS (Feature 3)
+// =============================================================================
+
+async function retryInstructions() {
+    showToast('Retrying instructions...', 'info');
+    try {
+        var res = await fetch('/project/retry-instructions', {method: 'POST'});
+        if (res.ok) {
+            var data = await res.json();
+            currentModel = data;
+            renderInstructionsTab();
+            showSaveIndicator();
+            showToast('Instructions regenerated!', 'success');
+        } else {
+            var err = await res.json();
+            showToast('Retry failed: ' + (err.detail || 'unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Retry failed: ' + e.message, 'error');
     }
 }

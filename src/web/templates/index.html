@@ -118,6 +118,11 @@
             <!-- Coverage Indicator -->
             <div id="coverage-indicator" class="coverage-indicator" style="display:none"></div>
 
+            <!-- Search Bar (Feature 2) -->
+            <div class="search-bar">
+                <input type="text" id="model-search" class="search-input" placeholder="Search elements...">
+            </div>
+
             <!-- Tab Bar -->
             <div id="tab-bar" class="tab-bar">
                 <div class="tab-buttons">
@@ -133,9 +138,12 @@
                             &#8659; Export &#9660;
                         </button>
                         <div id="export-menu" class="export-menu" style="display:none">
-                            <button onclick="exportModel('json')">Export JSON</button>
-                            <button onclick="exportModel('xlsx')">Export XLSX</button>
-                            <button onclick="exportModel('text')">Export Text</button>
+                            <div class="export-layer-filters" id="export-layer-filters"></div>
+                            <button onclick="exportProject('json')">Export JSON</button>
+                            <button onclick="exportProject('xlsx')">Export XLSX</button>
+                            <button onclick="exportProject('text')">Export Text</button>
+                            <div class="export-divider"></div>
+                            <button onclick="openPrintView()">Presentation View</button>
                         </div>
                     </div>
                 </div>
@@ -198,6 +206,7 @@
                 <div id="chat-resize-handle" class="chat-resize-handle"></div>
                 <div class="chat-header-bar">
                     <span class="chat-title">Chat Agent</span>
+                    <button class="btn-chat-clear" id="btn-chat-clear" onclick="clearChatHistory()" title="Clear chat history">Clear</button>
                 </div>
                 <div id="chat-body" class="chat-body">
                     <div id="chat-history" class="chat-history">
