@@ -1032,6 +1032,99 @@ body {
 .modal-cost     { max-width: 420px; }
 .modal-clarify  { max-width: 580px; }
 
+/* Error popup modal */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.15s ease;
+}
+
+.error-modal {
+    background: #0d0d1a;
+    border: 1px solid #4a2020;
+    border-radius: 12px;
+    padding: 24px 28px;
+    max-width: 500px;
+    width: 90%;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), 0 0 20px rgba(220, 38, 38, 0.1);
+    animation: slideUp 0.2s ease;
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.error-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.error-modal-icon {
+    font-size: 22px;
+    color: #dc2626;
+}
+
+.error-modal-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f87171;
+    margin: 0;
+}
+
+.error-modal-detail {
+    background: #111;
+    border: 1px solid #1e1e3a;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 14px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.error-modal-detail p {
+    color: #bbb;
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 0 0 6px 0;
+}
+.error-modal-detail p:last-child { margin-bottom: 0; }
+
+.error-modal-tip {
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 18px;
+    padding: 8px 12px;
+    background: #0a0a18;
+    border-radius: 6px;
+    border-left: 3px solid #7c7cff;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.btn-modal-primary {
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    color: #ccc;
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.btn-modal-primary:hover { background: #22224a; border-color: #4a4a8a; color: #fff; }
+
 /* Model select */
 .model-select {
     width: 100%;

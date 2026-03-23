@@ -1,4 +1,6 @@
 import json
+import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -12,6 +14,25 @@ from src.stages.clarify import apply_clarifications
 from src.stages.generate import generate_layer
 from src.stages.link import generate_links
 from src.stages.instruct import generate_instructions
+
+logger = logging.getLogger(__name__)
+
+STAGE_RETRIES = 2  # Total attempts per stage (1 original + 1 retry)
+STAGE_RETRY_DELAY = 3  # Seconds between retries
+
+
+def _run_with_retry(fn, stage_name, emit):
+    """Run a stage function with retry logic. Returns the result or raises."""
+    for attempt in range(1, STAGE_RETRIES + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            if attempt < STAGE_RETRIES:
+                logger.warning(f"Stage '{stage_name}' failed (attempt {attempt}): {exc}. Retrying in {STAGE_RETRY_DELAY}s...")
+                emit({"stage": stage_name, "status": "running", "detail": f"Retrying after error (attempt {attempt + 1})..."})
+                time.sleep(STAGE_RETRY_DELAY)
+            else:
+                raise
 
 
 def estimate_cost(requirements: list[Requirement], mode: str, selected_layers: list[str], model: str) -> dict:
@@ -90,7 +111,10 @@ def run_pipeline(
 
     # Stage 1: Analyze
     _emit({"stage": "analyze", "status": "running", "detail": "Analyzing requirements..."})
-    analysis = analyze_requirements(requirements, tracker, client=client)
+    analysis = _run_with_retry(
+        lambda: analyze_requirements(requirements, tracker, client=client),
+        "analyze", _emit,
+    )
     flagged_count = len(analysis.get("flagged", []))
     _emit({"stage": "analyze", "status": "complete", "detail": f"{flagged_count} issues found", "data": analysis})
 
@@ -104,20 +128,29 @@ def run_pipeline(
     layers = {}
     for i, layer_key in enumerate(selected_layers, 1):
         _emit({"stage": "generate", "status": "running", "detail": f"Generating {layer_key} ({i}/{len(selected_layers)})...", "cost": tracker.format_cost_line()})
-        layers[layer_key] = generate_layer(mode, layer_key, requirements, tracker, client=client)
+        layers[layer_key] = _run_with_retry(
+            lambda lk=layer_key: generate_layer(mode, lk, requirements, tracker, client=client),
+            "generate", _emit,
+        )
         _emit({"stage": "generate", "status": "layer_complete", "detail": f"{layer_key} complete", "cost": tracker.format_cost_line()})
 
     _emit({"stage": "generate", "status": "complete", "detail": f"All {len(selected_layers)} layers generated"})
 
     # Stage 4: Link
     _emit({"stage": "link", "status": "running", "detail": "Generating cross-element links...", "cost": tracker.format_cost_line()})
-    link_result = generate_links(mode, layers, requirements, tracker, client=client)
+    link_result = _run_with_retry(
+        lambda: generate_links(mode, layers, requirements, tracker, client=client),
+        "link", _emit,
+    )
     links = [Link(**l) for l in link_result.get("links", [])]
     _emit({"stage": "link", "status": "complete", "detail": f"{len(links)} links created", "cost": tracker.format_cost_line()})
 
     # Stage 5: Instruct
     _emit({"stage": "instruct", "status": "running", "detail": "Generating recreation instructions...", "cost": tracker.format_cost_line()})
-    instructions = generate_instructions(mode, {"layers": layers}, tracker, client=client)
+    instructions = _run_with_retry(
+        lambda: generate_instructions(mode, {"layers": layers}, tracker, client=client),
+        "instruct", _emit,
+    )
     _emit({"stage": "instruct", "status": "complete", "detail": "Instructions generated", "cost": tracker.format_cost_line()})
 
     # Build final model

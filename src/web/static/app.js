@@ -283,7 +283,7 @@ async function proceedGenerate(clarifications) {
         });
         if (!res.ok) {
             var err = await res.json();
-            showToast(err.detail || 'Failed to start generation', 'error');
+            showErrorPopup('Failed to Start Generation', err.detail || 'Unknown server error');
             return;
         }
         var data = await res.json();
@@ -410,7 +410,7 @@ function handlePipelineEvent(event) {
     if (stage === 'error') {
         if (sseSource) { sseSource.close(); sseSource = null; }
         hideProgressArea();
-        showToast('Pipeline error: ' + detail, 'error');
+        showErrorPopup('Pipeline Failed', detail);
         return;
     }
 
@@ -1521,6 +1521,56 @@ function showToast(message, type) {
     toast.textContent = message;
     document.getElementById('toast-container').appendChild(toast);
     setTimeout(function () { toast.remove(); }, 4000);
+}
+
+function showErrorPopup(title, detail) {
+    // Remove any existing error popup
+    var existing = document.getElementById('error-popup-overlay');
+    if (existing) existing.remove();
+
+    var overlay = el('div', { className: 'modal-overlay', id: 'error-popup-overlay' });
+    var modal = el('div', { className: 'modal error-modal' });
+
+    // Header
+    var header = el('div', { className: 'error-modal-header' });
+    var icon = el('span', { className: 'error-modal-icon', textContent: '\u26a0' });
+    var titleEl = el('h3', { className: 'error-modal-title', textContent: title || 'Error' });
+    header.appendChild(icon);
+    header.appendChild(titleEl);
+    modal.appendChild(header);
+
+    // Detail text
+    var detailEl = el('div', { className: 'error-modal-detail' });
+    // Split long error messages into readable lines
+    var lines = String(detail || 'An unknown error occurred.').split(/[.!]\s+/);
+    lines.forEach(function (line) {
+        line = line.trim();
+        if (!line) return;
+        var p = el('p', { textContent: line + (line.endsWith('.') ? '' : '.') });
+        detailEl.appendChild(p);
+    });
+    modal.appendChild(detailEl);
+
+    // Tip
+    var tip = el('div', { className: 'error-modal-tip' });
+    tip.appendChild(el('span', { textContent: 'Tip: ', style: 'color: #7c7cff; font-weight: 500;' }));
+    tip.appendChild(document.createTextNode('Try a different model in Settings, or reduce the number of selected layers.'));
+    modal.appendChild(tip);
+
+    // Close button
+    var btnRow = el('div', { className: 'modal-actions' });
+    var closeBtn = el('button', { className: 'btn-modal-primary', textContent: 'Dismiss' });
+    closeBtn.addEventListener('click', function () { overlay.remove(); });
+    btnRow.appendChild(closeBtn);
+    modal.appendChild(btnRow);
+
+    // Close on overlay click
+    overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) overlay.remove();
+    });
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
 }
 
 // =============================================================================
