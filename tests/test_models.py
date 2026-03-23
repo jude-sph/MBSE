@@ -59,3 +59,57 @@ def test_mbse_model_round_trip():
 def test_instruction_step():
     step = InstructionStep(step=1, action="Create project", detail="File > New", layer="general")
     assert step.step == 1
+
+
+def test_operational_process():
+    from src.models.capella import OperationalProcess
+    p = OperationalProcess(id="OP-001", name="SAR Process", capability_ref="OC-001", activity_refs=["OA-001"])
+    assert p.capability_ref == "OC-001"
+
+
+def test_communication_mean():
+    from src.models.capella import CommunicationMean
+    cm = CommunicationMean(id="CM-001", name="VHF Radio Link", source_entity="OE-001", target_entity="OE-002")
+    assert cm.source_entity == "OE-001"
+
+
+def test_operational_mode_state():
+    from src.models.capella import OperationalModeState
+    ms = OperationalModeState(id="OMS-001", name="Standby", type="State", transitions=[{"target": "OMS-002", "trigger": "Alert"}])
+    assert ms.type == "State"
+
+
+def test_system_definition():
+    from src.models.capella import SystemDefinition
+    s = SystemDefinition(id="SYS-001", name="PIB Icebreaker", description="Coast Guard Icebreaker")
+    assert s.name == "PIB Icebreaker"
+
+
+def test_specified_capability():
+    from src.models.capella import SpecifiedCapability
+    sc = SpecifiedCapability(id="SC-001", name="Station Keeping", involved_functions=["SF-001"], involved_chains=["SFC-001"])
+    assert len(sc.involved_functions) == 1
+
+
+def test_logical_functional_chain():
+    from src.models.capella import LogicalFunctionalChain
+    lfc = LogicalFunctionalChain(id="LFC-001", name="Propulsion Chain", function_refs=["LF-001"], exchange_refs=["LFE-001"])
+    assert len(lfc.function_refs) == 1
+
+
+def test_hosting_component():
+    from src.models.capella import HostingComponent
+    hc = HostingComponent(id="HC-001", name="Bridge Console", hosted_components=["PC-001", "PC-002"])
+    assert len(hc.hosted_components) == 2
+
+
+def test_configuration_item():
+    from src.models.capella import ConfigurationItem
+    ci = ConfigurationItem(id="CI-001", name="Propulsion Control Unit", type="HW", description="Main controller", physical_component_refs=["PC-001"])
+    assert ci.type == "HW"
+
+
+def test_pbs_node():
+    from src.models.capella import PBSNode
+    node = PBSNode(id="PBS-001", name="Propulsion System", parent_id=None, children_ids=["PBS-002"], ci_ref="CI-001")
+    assert node.ci_ref == "CI-001"
