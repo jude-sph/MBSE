@@ -166,9 +166,17 @@ def export_text(model: MBSEModel, output_path: Path) -> Path:
                         for k, v in element.items():
                             if k in ("id", "name"):
                                 continue
-                            if isinstance(v, list):
+                            if isinstance(v, list) and v and isinstance(v[0], dict):
+                                # List of dicts (e.g., scenario steps) - format each on its own line
+                                lines.append(f"      {k}:")
+                                for item in v:
+                                    parts = [f"{ik}={iv}" for ik, iv in item.items()]
+                                    lines.append(f"        - {', '.join(parts)}")
+                            elif isinstance(v, list):
                                 v = ", ".join(str(i) for i in v)
-                            lines.append(f"      {k}: {v}")
+                                lines.append(f"      {k}: {v}")
+                            else:
+                                lines.append(f"      {k}: {v}")
                     else:
                         lines.append(f"    {element}")
                 lines.append("")
