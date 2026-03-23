@@ -1,0 +1,1493 @@
+// =============================================================================
+// MBSE Generator — Frontend JavaScript
+// =============================================================================
+
+// =============================================================================
+// 1. STATE MANAGEMENT
+// =============================================================================
+
+let currentModel = null;       // MBSEModel JSON from server
+let currentJobId = null;       // Active job ID
+let selectedMode = 'capella';  // 'capella' or 'rhapsody'
+let selectedLayers = [];       // Selected layer/diagram keys
+let uploadedFile = null;       // File object from upload
+let parsedRequirements = [];   // Requirements from server after upload
+let conversationHistory = [];  // Chat agent history
+let sseSource = null;          // EventSource for SSE
+
+// Internal: pending settings during cost confirmation flow
+let _pendingSettings = null;
+
+// =============================================================================
+// 2. INITIALIZATION (DOMContentLoaded)
+// =============================================================================
+
+document.addEventListener('DOMContentLoaded', function () {
+    // Mode toggle
+    document.querySelectorAll('#mode-toggle .segment').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            setMode(btn.getAttribute('data-mode'));
+        });
+    });
+
+    // Layer checkboxes
+    document.querySelectorAll('#capella-layers input[type=checkbox]').forEach(function (cb) {
+        cb.addEventListener('change', readSelectedLayers);
+    });
+    document.querySelectorAll('#rhapsody-diagrams input[type=checkbox]').forEach(function (cb) {
+        cb.addEventListener('change', readSelectedLayers);
+    });
+
+    // Provider selector — initialize from CURRENT_SETTINGS
+    initProvider();
+
+    // Initialize mode from CURRENT_SETTINGS
+    if (CURRENT_SETTINGS && CURRENT_SETTINGS.default_mode) {
+        setMode(CURRENT_SETTINGS.default_mode);
+    }
+
+    // Initialize selected layers from visible checkboxes
+    readSelectedLayers();
+
+    // Settings modal model selector change handler
+    var modelSelect = document.getElementById('settings-model');
+    if (modelSelect) {
+        modelSelect.addEventListener('change', function () {
+            showModelDetail(this.value);
+        });
+        if (CURRENT_SETTINGS && CURRENT_SETTINGS.model) {
+            modelSelect.value = CURRENT_SETTINGS.model;
+            showModelDetail(CURRENT_SETTINGS.model);
+        }
+    }
+
+    // Close export menu on outside click
+    document.addEventListener('click', function (e) {
+        var menu = document.getElementById('export-menu');
+        if (menu && menu.style.display !== 'none') {
+            if (!e.target.closest('.export-dropdown')) {
+                menu.style.display = 'none';
+            }
+        }
+    });
+
+    // Check for updates quietly on page load
+    checkUpdatesQuietly();
+});
+
+// =============================================================================
+// 3. MODE TOGGLE
+// =============================================================================
+
+function setMode(mode) {
+    selectedMode = mode;
+
+    // Update segment buttons
+    document.querySelectorAll('#mode-toggle .segment').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
+    });
+
+    // Show/hide layer groups
+    var capellaGroup = document.getElementById('capella-layers');
+    var rhapsodyGroup = document.getElementById('rhapsody-diagrams');
+    if (capellaGroup) capellaGroup.style.display = mode === 'capella' ? '' : 'none';
+    if (rhapsodyGroup) rhapsodyGroup.style.display = mode === 'rhapsody' ? '' : 'none';
+
+    // Update section label
+    var label = document.querySelector('#layer-selection .section-label');
+    if (label) label.textContent = mode === 'capella' ? 'Layers' : 'Diagrams';
+
+    readSelectedLayers();
+}
+
+function readSelectedLayers() {
+    var groupId = selectedMode === 'capella' ? 'capella-layers' : 'rhapsody-diagrams';
+    var group = document.getElementById(groupId);
+    if (!group) { selectedLayers = []; return; }
+
+    selectedLayers = [];
+    group.querySelectorAll('input[type=checkbox]:checked').forEach(function (cb) {
+        selectedLayers.push(cb.value);
+    });
+}
+
+// =============================================================================
+// 4. FILE UPLOAD
+// =============================================================================
+
+function handleDragOver(e) {
+    e.preventDefault();
+    document.getElementById('upload-zone').classList.add('dragover');
+}
+
+function handleDragLeave(e) {
+    document.getElementById('upload-zone').classList.remove('dragover');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    document.getElementById('upload-zone').classList.remove('dragover');
+    var files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+        processFile(files[0]);
+    }
+}
+
+function handleFileSelect(input) {
+    if (input.files && input.files.length > 0) {
+        processFile(input.files[0]);
+    }
+}
+
+async function processFile(file) {
+    uploadedFile = file;
+    var zone = document.getElementById('upload-zone');
+    zone.classList.add('uploading');
+
+    var formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        var res = await fetch('/upload', { method: 'POST', body: formData });
+        if (!res.ok) {
+            var err = await res.json();
+            showToast(err.detail || 'Upload failed', 'error');
+            zone.classList.remove('uploading');
+            return;
+        }
+        var data = await res.json();
+        parsedRequirements = data.requirements || [];
+
+        // Show file status
+        document.getElementById('file-status').style.display = '';
+        document.getElementById('file-name').textContent = file.name;
+        document.getElementById('req-count').textContent = parsedRequirements.length + ' requirements';
+
+        // Enable generate button
+        document.getElementById('generate-btn').disabled = false;
+
+        showToast('Loaded ' + parsedRequirements.length + ' requirements from ' + file.name, 'success');
+    } catch (e) {
+        showToast('Upload failed: ' + e.message, 'error');
+    }
+
+    zone.classList.remove('uploading');
+}
+
+// =============================================================================
+// 5. PROVIDER SELECTOR
+// =============================================================================
+
+function initProvider() {
+    var provider = (CURRENT_SETTINGS && CURRENT_SETTINGS.provider) || 'anthropic';
+    setProvider(provider);
+}
+
+function setProvider(provider) {
+    document.querySelectorAll('#provider-selector .segment').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-provider') === provider);
+    });
+    if (typeof CURRENT_SETTINGS !== 'undefined') {
+        CURRENT_SETTINGS.provider = provider;
+    }
+}
+
+// =============================================================================
+// 6. PIPELINE EXECUTION (GENERATE BUTTON)
+// =============================================================================
+
+async function startGenerate() {
+    readSelectedLayers();
+
+    if (selectedLayers.length === 0) {
+        showToast('Please select at least one layer.', 'error');
+        return;
+    }
+    if (parsedRequirements.length === 0) {
+        showToast('Please upload a requirements file first.', 'error');
+        return;
+    }
+
+    var settings = gatherSettings();
+    _pendingSettings = settings;
+
+    try {
+        var res = await fetch('/estimate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mode: settings.mode,
+                selected_layers: settings.selected_layers,
+                model: settings.model,
+            }),
+        });
+        if (!res.ok) {
+            var err = await res.json();
+            showToast(err.detail || 'Failed to get estimate', 'error');
+            return;
+        }
+        var estimate = await res.json();
+        showCostModal(estimate);
+    } catch (e) {
+        showToast('Could not estimate cost: ' + e.message, 'error');
+    }
+}
+
+function gatherSettings() {
+    var provider = (CURRENT_SETTINGS && CURRENT_SETTINGS.provider) || 'anthropic';
+    var model = (CURRENT_SETTINGS && CURRENT_SETTINGS.model) || 'claude-sonnet-4-6';
+
+    var modelSelect = document.getElementById('settings-model');
+    if (modelSelect && modelSelect.value) {
+        model = modelSelect.value;
+    }
+
+    return {
+        mode: selectedMode,
+        selected_layers: selectedLayers.slice(),
+        model: model,
+        provider: provider,
+    };
+}
+
+function showCostModal(estimate) {
+    document.getElementById('cost-model-name').textContent = estimate.model || 'Unknown';
+    document.getElementById('cost-calls').textContent = estimate.total_calls || 0;
+    var minCost = formatCost(estimate.estimated_min_cost || 0);
+    var maxCost = formatCost(estimate.estimated_max_cost || 0);
+    document.getElementById('cost-range').textContent = minCost + ' \u2013 ' + maxCost;
+    document.getElementById('cost-modal').style.display = '';
+}
+
+function closeCostModal() {
+    document.getElementById('cost-modal').style.display = 'none';
+    _pendingSettings = null;
+}
+
+async function proceedGenerate(clarifications) {
+    document.getElementById('cost-modal').style.display = 'none';
+
+    var settings = _pendingSettings;
+    _pendingSettings = null;
+    if (!settings) return;
+
+    if (clarifications) {
+        settings.clarifications = clarifications;
+    }
+
+    try {
+        var res = await fetch('/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings),
+        });
+        if (!res.ok) {
+            var err = await res.json();
+            showToast(err.detail || 'Failed to start generation', 'error');
+            return;
+        }
+        var data = await res.json();
+        currentJobId = data.job_id;
+        showProgressArea(settings);
+        connectSSE(currentJobId);
+    } catch (e) {
+        showToast('Failed to start: ' + e.message, 'error');
+    }
+}
+
+function showProgressArea(settings) {
+    document.getElementById('tab-content').style.display = 'none';
+    document.getElementById('progress-area').style.display = '';
+    document.getElementById('running-cost').textContent = '';
+
+    var stagesDiv = document.getElementById('pipeline-stages');
+    clearChildren(stagesDiv);
+
+    var stages = [
+        { key: 'analyze', label: 'Analyze' },
+        { key: 'clarify', label: 'Clarify' },
+        { key: 'generate', label: 'Generate' },
+        { key: 'link', label: 'Link' },
+        { key: 'instruct', label: 'Instruct' },
+    ];
+
+    stages.forEach(function (s) {
+        var row = el('div', { className: 'stage-row', id: 'stage-' + s.key });
+        var label = el('span', { className: 'stage-label', textContent: s.label });
+        var barWrap = el('div', { className: 'stage-bar-wrap' });
+        var bar = el('div', { className: 'stage-bar', id: 'bar-' + s.key });
+        barWrap.appendChild(bar);
+        var detail = el('span', { className: 'stage-detail', id: 'detail-' + s.key });
+        row.appendChild(label);
+        row.appendChild(barWrap);
+        row.appendChild(detail);
+        stagesDiv.appendChild(row);
+    });
+}
+
+function connectSSE(jobId) {
+    if (sseSource) {
+        sseSource.close();
+        sseSource = null;
+    }
+    sseSource = new EventSource('/stream/' + jobId);
+
+    sseSource.onmessage = function (e) {
+        try {
+            var event = JSON.parse(e.data);
+            handlePipelineEvent(event);
+        } catch (err) {
+            console.error('SSE parse error', err);
+        }
+    };
+
+    sseSource.onerror = function () {
+        sseSource.close();
+        sseSource = null;
+    };
+}
+
+function handlePipelineEvent(event) {
+    var stage = event.stage;
+    var status = event.status;
+    var detail = event.detail || '';
+    var cost = event.cost || '';
+
+    if (cost) {
+        document.getElementById('running-cost').textContent = cost;
+    }
+
+    if (stage === 'done') {
+        if (sseSource) { sseSource.close(); sseSource = null; }
+        document.getElementById('running-cost').textContent = detail;
+        fetchAndDisplayModel(currentJobId);
+        return;
+    }
+
+    if (stage === 'cancelled') {
+        if (sseSource) { sseSource.close(); sseSource = null; }
+        hideProgressArea();
+        showToast('Job cancelled.', 'info');
+        return;
+    }
+
+    if (stage === 'error') {
+        if (sseSource) { sseSource.close(); sseSource = null; }
+        hideProgressArea();
+        showToast('Pipeline error: ' + detail, 'error');
+        return;
+    }
+
+    // Check for clarification trigger from analyze stage
+    if (stage === 'analyze' && status === 'complete' && event.data) {
+        var flagged = (event.data && event.data.flagged) || [];
+        if (flagged.length > 0) {
+            showClarificationModal(flagged);
+        }
+    }
+
+    var stageRow = document.getElementById('stage-' + stage);
+    var bar = document.getElementById('bar-' + stage);
+    var detailEl = document.getElementById('detail-' + stage);
+
+    if (!stageRow) return;
+
+    if (status === 'running') {
+        stageRow.className = 'stage-row stage-running';
+        if (bar) bar.style.width = '60%';
+        if (detailEl) detailEl.textContent = detail;
+    } else if (status === 'complete' || status === 'layer_complete') {
+        stageRow.className = 'stage-row stage-complete';
+        if (bar) bar.style.width = '100%';
+        if (detailEl) detailEl.textContent = detail;
+    }
+}
+
+async function fetchAndDisplayModel(jobId) {
+    try {
+        var res = await fetch('/job/' + jobId);
+        if (!res.ok) {
+            var err = await res.json();
+            showToast('Failed to load model: ' + (err.detail || 'unknown error'), 'error');
+            hideProgressArea();
+            return;
+        }
+        currentModel = await res.json();
+        hideProgressArea();
+        renderTree();
+        switchTab('tree');
+        showToast('Model generated successfully!', 'success');
+    } catch (e) {
+        showToast('Failed to load model: ' + e.message, 'error');
+        hideProgressArea();
+    }
+}
+
+function hideProgressArea() {
+    document.getElementById('progress-area').style.display = 'none';
+    document.getElementById('tab-content').style.display = '';
+}
+
+async function cancelJob() {
+    if (!currentJobId) return;
+    try {
+        await fetch('/cancel/' + currentJobId, { method: 'POST' });
+    } catch (e) {
+        // ignore
+    }
+    if (sseSource) { sseSource.close(); sseSource = null; }
+    hideProgressArea();
+    showToast('Cancellation requested.', 'info');
+}
+
+// =============================================================================
+// 7. TREE RENDERING
+// =============================================================================
+
+function renderTree() {
+    var container = document.getElementById('tab-tree');
+    clearChildren(container);
+
+    if (!currentModel || !currentModel.layers) {
+        container.appendChild(el('div', {
+            className: 'empty-state',
+            textContent: 'No model loaded. Generate a model first.',
+        }));
+        return;
+    }
+
+    var layers = currentModel.layers;
+    var layerKeys = Object.keys(layers);
+
+    if (layerKeys.length === 0) {
+        container.appendChild(el('div', {
+            className: 'empty-state',
+            textContent: 'Model contains no layers.',
+        }));
+        return;
+    }
+
+    layerKeys.forEach(function (layerKey) {
+        var layerData = layers[layerKey];
+        var layerSection = renderLayerSection(layerKey, layerData);
+        container.appendChild(layerSection);
+    });
+}
+
+function renderLayerSection(layerKey, layerData) {
+    var displayName = (CAPELLA_LAYERS && CAPELLA_LAYERS[layerKey]) ||
+                      (RHAPSODY_DIAGRAMS && RHAPSODY_DIAGRAMS[layerKey]) ||
+                      layerKey;
+
+    var totalCount = 0;
+    if (layerData && typeof layerData === 'object') {
+        Object.values(layerData).forEach(function (coll) {
+            if (Array.isArray(coll)) totalCount += coll.length;
+        });
+    }
+
+    var section = el('div', { className: 'layer-section', id: 'layer-section-' + layerKey });
+
+    var header = el('div', { className: 'layer-header' });
+    var arrow = el('span', { className: 'layer-arrow open', textContent: '\u25be' });
+    var title = el('span', { className: 'layer-title', textContent: displayName });
+    var countBadge = el('span', { className: 'layer-count', textContent: totalCount + ' elements' });
+    var regenBtn = el('button', { className: 'btn-regen', title: 'Regenerate this layer', textContent: '\u21ba Regen' });
+    regenBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        regenLayer(layerKey);
+    });
+
+    header.appendChild(arrow);
+    header.appendChild(title);
+    header.appendChild(countBadge);
+    header.appendChild(regenBtn);
+
+    var body = el('div', { className: 'layer-body', id: 'layer-body-' + layerKey });
+
+    header.addEventListener('click', function () {
+        var isOpen = body.style.display !== 'none';
+        body.style.display = isOpen ? 'none' : '';
+        arrow.textContent = isOpen ? '\u25b8' : '\u25be';
+        arrow.classList.toggle('open', !isOpen);
+    });
+
+    section.appendChild(header);
+    section.appendChild(body);
+
+    if (layerData && typeof layerData === 'object') {
+        Object.keys(layerData).forEach(function (collKey) {
+            var collection = layerData[collKey];
+            if (!Array.isArray(collection)) return;
+            var collSection = renderCollection(layerKey, collKey, collection);
+            body.appendChild(collSection);
+        });
+    }
+
+    return section;
+}
+
+function renderCollection(layerKey, collKey, elements) {
+    var collLabel = collKey.charAt(0).toUpperCase() + collKey.slice(1).replace(/_/g, ' ');
+
+    var section = el('div', { className: 'collection-section', id: 'coll-' + layerKey + '-' + collKey });
+
+    var header = el('div', { className: 'collection-header' });
+    header.appendChild(el('span', { className: 'collection-name', textContent: collLabel }));
+    header.appendChild(el('span', { className: 'collection-count', textContent: '(' + elements.length + ')' }));
+
+    var listDiv = el('div', { className: 'element-list', id: 'list-' + layerKey + '-' + collKey });
+
+    elements.forEach(function (elem) {
+        listDiv.appendChild(renderElementRow(layerKey, collKey, elem));
+    });
+
+    var addBtn = el('button', { className: 'btn-add-element', textContent: '+ Add' });
+    addBtn.addEventListener('click', function () {
+        showAddElementForm(layerKey, collKey, listDiv, addBtn);
+    });
+
+    section.appendChild(header);
+    section.appendChild(listDiv);
+    section.appendChild(addBtn);
+    return section;
+}
+
+function renderElementRow(layerKey, collKey, elem) {
+    var row = el('div', { className: 'element-row', id: 'elem-row-' + (elem.id || '') });
+
+    var idBadge = el('span', { className: 'element-id', textContent: elem.id || '?' });
+    var name = el('span', { className: 'element-name', textContent: elem.name || elem.id || '(unnamed)' });
+
+    row.appendChild(idBadge);
+    row.appendChild(name);
+
+    if (elem.type) {
+        row.appendChild(el('span', { className: 'element-type', textContent: elem.type }));
+    }
+
+    var actions = el('div', { className: 'element-actions' });
+
+    var editBtn = el('button', { className: 'btn-icon-small', title: 'Edit', textContent: '\u270e' });
+    editBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        startInlineEdit(row, layerKey, collKey, elem);
+    });
+
+    var deleteBtn = el('button', { className: 'btn-icon-small btn-delete', title: 'Delete', textContent: '\u2715' });
+    deleteBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        deleteElement(elem.id, layerKey, collKey);
+    });
+
+    actions.appendChild(editBtn);
+    actions.appendChild(deleteBtn);
+    row.appendChild(actions);
+
+    return row;
+}
+
+async function regenLayer(layerKey) {
+    if (!currentModel) {
+        showToast('No model to regenerate layer for.', 'error');
+        return;
+    }
+    showToast('Regenerating layer ' + layerKey + '...', 'info');
+    try {
+        var settings = gatherSettings();
+        settings.selected_layers = [layerKey];
+        var res = await fetch('/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings),
+        });
+        if (!res.ok) {
+            var err = await res.json();
+            showToast(err.detail || 'Regen failed', 'error');
+            return;
+        }
+        var data = await res.json();
+        await pollJobUntilComplete(data.job_id, function (completedModel) {
+            if (completedModel && completedModel.layers && completedModel.layers[layerKey]) {
+                currentModel.layers[layerKey] = completedModel.layers[layerKey];
+                renderTree();
+                showToast('Layer ' + layerKey + ' regenerated.', 'success');
+            }
+        });
+    } catch (e) {
+        showToast('Regen failed: ' + e.message, 'error');
+    }
+}
+
+async function pollJobUntilComplete(jobId, onComplete) {
+    var maxWait = 120000;
+    var start = Date.now();
+    while (Date.now() - start < maxWait) {
+        await sleep(2000);
+        try {
+            var res = await fetch('/job/' + jobId);
+            if (res.ok) {
+                var model = await res.json();
+                onComplete(model);
+                return;
+            }
+        } catch (e) {
+            // keep polling
+        }
+    }
+    showToast('Regen timed out.', 'error');
+}
+
+function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+// =============================================================================
+// 8. OUTPUT TABS
+// =============================================================================
+
+function switchTab(tabName) {
+    document.querySelectorAll('.tab-btn').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-tab') === tabName);
+    });
+
+    document.querySelectorAll('.tab-pane').forEach(function (pane) {
+        pane.style.display = 'none';
+    });
+
+    var activePane = document.getElementById('tab-' + tabName);
+    if (activePane) activePane.style.display = '';
+
+    if (tabName === 'links') renderLinksTab();
+    if (tabName === 'instructions') renderInstructionsTab();
+    if (tabName === 'json') renderJsonTab();
+}
+
+function renderLinksTab() {
+    var tbody = document.getElementById('links-tbody');
+    if (!tbody) return;
+    clearChildren(tbody);
+
+    if (!currentModel || !currentModel.links || currentModel.links.length === 0) {
+        var row = document.createElement('tr');
+        var td = document.createElement('td');
+        td.colSpan = 3;
+        td.textContent = 'No links in this model.';
+        td.style.textAlign = 'center';
+        td.style.color = '#666';
+        row.appendChild(td);
+        tbody.appendChild(row);
+        return;
+    }
+
+    currentModel.links.forEach(function (link) {
+        var row = document.createElement('tr');
+        row.appendChild(el('td', { textContent: link.source }));
+        row.appendChild(el('td', { className: 'link-type', textContent: link.type }));
+        row.appendChild(el('td', { textContent: link.target }));
+        tbody.appendChild(row);
+    });
+}
+
+function renderInstructionsTab() {
+    var list = document.getElementById('instructions-list');
+    if (!list) return;
+    clearChildren(list);
+
+    if (!currentModel || !currentModel.instructions) {
+        list.appendChild(el('li', { textContent: 'No instructions available.' }));
+        return;
+    }
+
+    var steps = currentModel.instructions.steps || [];
+    if (steps.length === 0) {
+        list.appendChild(el('li', { textContent: 'No steps generated.' }));
+        return;
+    }
+
+    steps.forEach(function (step) {
+        var li = document.createElement('li');
+        li.className = 'instruction-step';
+
+        li.appendChild(el('strong', { textContent: step.action || '' }));
+        li.appendChild(document.createTextNode(step.detail ? ' \u2014 ' + step.detail : ''));
+
+        if (step.layer) {
+            li.appendChild(el('span', { className: 'step-layer-tag', textContent: step.layer }));
+        }
+
+        var stepText = (step.action || '') + (step.detail ? ': ' + step.detail : '');
+        var copyBtn = el('button', { className: 'btn-copy', title: 'Copy step', textContent: '\u29c9' });
+        copyBtn.addEventListener('click', function () { copyToClipboard(stepText); });
+        li.appendChild(copyBtn);
+
+        list.appendChild(li);
+    });
+}
+
+function renderJsonTab() {
+    var pre = document.getElementById('json-output');
+    if (!pre) return;
+    pre.textContent = currentModel ? JSON.stringify(currentModel, null, 2) : 'No model loaded.';
+}
+
+// =============================================================================
+// 9. INLINE EDITING
+// =============================================================================
+
+function startInlineEdit(row, layerKey, collKey, elem) {
+    if (row.querySelector('.edit-input')) return;
+
+    var nameSpan = row.querySelector('.element-name');
+    if (!nameSpan) return;
+
+    var originalName = nameSpan.textContent;
+    nameSpan.style.display = 'none';
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'edit-input';
+    input.value = originalName;
+
+    var saveBtn = el('button', { className: 'btn-save-edit', textContent: '\u2713' });
+    var cancelBtn = el('button', { className: 'btn-cancel-edit', textContent: '\u2715' });
+
+    saveBtn.addEventListener('click', function () {
+        saveInlineEdit(row, layerKey, collKey, elem, input.value, nameSpan);
+    });
+
+    cancelBtn.addEventListener('click', function () {
+        input.remove();
+        saveBtn.remove();
+        cancelBtn.remove();
+        nameSpan.style.display = '';
+    });
+
+    input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') saveBtn.click();
+        if (e.key === 'Escape') cancelBtn.click();
+    });
+
+    row.insertBefore(input, nameSpan.nextSibling);
+    row.insertBefore(saveBtn, input.nextSibling);
+    row.insertBefore(cancelBtn, saveBtn.nextSibling);
+    input.focus();
+    input.select();
+}
+
+async function saveInlineEdit(row, layerKey, collKey, elem, newName, nameSpan) {
+    if (!currentJobId) {
+        showToast('No active job to save edits to.', 'error');
+        return;
+    }
+
+    var input = row.querySelector('.edit-input');
+    var saveBtn = row.querySelector('.btn-save-edit');
+    var cancelBtn = row.querySelector('.btn-cancel-edit');
+
+    try {
+        var res = await fetch('/job/' + currentJobId + '/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tool_name: 'modify_element',
+                arguments: {
+                    element_id: elem.id,
+                    updates: { name: newName },
+                },
+            }),
+        });
+        var data = await res.json();
+        if (!data.success) {
+            showToast('Edit failed: ' + data.message, 'error');
+            return;
+        }
+
+        // Update local model
+        if (currentModel && currentModel.layers[layerKey] && currentModel.layers[layerKey][collKey]) {
+            var coll = currentModel.layers[layerKey][collKey];
+            for (var i = 0; i < coll.length; i++) {
+                if (coll[i].id === elem.id) {
+                    coll[i].name = newName;
+                    break;
+                }
+            }
+        }
+
+        nameSpan.textContent = newName;
+        nameSpan.style.display = '';
+        if (input) input.remove();
+        if (saveBtn) saveBtn.remove();
+        if (cancelBtn) cancelBtn.remove();
+
+        showToast('Element updated.', 'success');
+    } catch (e) {
+        showToast('Edit failed: ' + e.message, 'error');
+    }
+}
+
+async function deleteElement(elementId, layerKey, collKey) {
+    if (!elementId) return;
+    if (!confirm('Delete element ' + elementId + '? This action cannot be undone.')) return;
+    if (!currentJobId) {
+        showToast('No active job.', 'error');
+        return;
+    }
+
+    try {
+        var res = await fetch('/job/' + currentJobId + '/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tool_name: 'remove_element',
+                arguments: { element_id: elementId, cascade: true },
+            }),
+        });
+        var data = await res.json();
+        if (!data.success) {
+            showToast('Delete failed: ' + data.message, 'error');
+            return;
+        }
+
+        if (currentModel && currentModel.layers[layerKey] && currentModel.layers[layerKey][collKey]) {
+            currentModel.layers[layerKey][collKey] = currentModel.layers[layerKey][collKey].filter(
+                function (e) { return e.id !== elementId; }
+            );
+        }
+
+        renderTree();
+        showToast('Element deleted.', 'success');
+    } catch (e) {
+        showToast('Delete failed: ' + e.message, 'error');
+    }
+}
+
+function showAddElementForm(layerKey, collKey, listDiv, addBtn) {
+    var existing = listDiv.parentNode.querySelector('.add-element-form');
+    if (existing) { existing.remove(); return; }
+
+    var form = el('div', { className: 'add-element-form' });
+
+    var idInput = document.createElement('input');
+    idInput.type = 'text';
+    idInput.className = 'edit-input';
+    idInput.placeholder = 'ID (e.g. OE-99)';
+
+    var nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'edit-input';
+    nameInput.placeholder = 'Name';
+
+    var typeInput = document.createElement('input');
+    typeInput.type = 'text';
+    typeInput.className = 'edit-input';
+    typeInput.placeholder = 'Type (optional)';
+
+    var saveBtn = el('button', { className: 'btn-save-edit', textContent: '\u2713 Add' });
+    var cancelBtn = el('button', { className: 'btn-cancel-edit', textContent: '\u2715 Cancel' });
+
+    saveBtn.addEventListener('click', async function () {
+        var newId = idInput.value.trim();
+        var newName = nameInput.value.trim();
+        var newType = typeInput.value.trim();
+
+        if (!newId || !newName) {
+            showToast('ID and Name are required.', 'error');
+            return;
+        }
+
+        var newElem = { id: newId, name: newName };
+        if (newType) newElem.type = newType;
+
+        await addElement(layerKey, collKey, newElem);
+        form.remove();
+    });
+
+    cancelBtn.addEventListener('click', function () { form.remove(); });
+
+    form.appendChild(idInput);
+    form.appendChild(nameInput);
+    form.appendChild(typeInput);
+    form.appendChild(saveBtn);
+    form.appendChild(cancelBtn);
+
+    addBtn.parentNode.insertBefore(form, addBtn);
+    idInput.focus();
+}
+
+async function addElement(layerKey, collKey, newElem) {
+    if (!currentJobId) {
+        showToast('No active job.', 'error');
+        return;
+    }
+
+    try {
+        var res = await fetch('/job/' + currentJobId + '/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tool_name: 'add_element',
+                arguments: { layer: layerKey, collection: collKey, element: newElem },
+            }),
+        });
+        var data = await res.json();
+        if (!data.success) {
+            showToast('Add failed: ' + data.message, 'error');
+            return;
+        }
+
+        if (currentModel && currentModel.layers[layerKey]) {
+            if (!currentModel.layers[layerKey][collKey]) {
+                currentModel.layers[layerKey][collKey] = [];
+            }
+            currentModel.layers[layerKey][collKey].push(newElem);
+        }
+
+        renderTree();
+        showToast('Element added.', 'success');
+    } catch (e) {
+        showToast('Add failed: ' + e.message, 'error');
+    }
+}
+
+// =============================================================================
+// 10. CHAT AGENT
+// =============================================================================
+
+function toggleChat() {
+    var panel = document.getElementById('chat-panel');
+    var body = document.getElementById('chat-body');
+    var arrow = document.getElementById('chat-toggle-arrow');
+
+    var isCollapsed = panel.classList.contains('collapsed');
+    if (isCollapsed) {
+        panel.classList.remove('collapsed');
+        body.style.display = '';
+        if (arrow) arrow.textContent = '\u2335';
+    } else {
+        panel.classList.add('collapsed');
+        body.style.display = 'none';
+        if (arrow) arrow.textContent = '\u2963';
+    }
+}
+
+async function sendChat() {
+    if (!currentJobId) {
+        showToast('No active job. Generate a model first.', 'error');
+        return;
+    }
+
+    var input = document.getElementById('chat-input');
+    var message = input.value.trim();
+    if (!message) return;
+
+    input.value = '';
+    appendChatMessage('user', message);
+
+    var sendBtn = document.querySelector('.btn-send');
+    if (sendBtn) sendBtn.disabled = true;
+
+    var loadingEl = appendChatMessage('agent', '\u2026', true);
+
+    try {
+        var res = await fetch('/job/' + currentJobId + '/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: message }),
+        });
+
+        if (!res.ok) {
+            var err = await res.json();
+            loadingEl.remove();
+            appendChatMessage('agent', 'Error: ' + (err.detail || 'unknown error'));
+        } else {
+            var data = await res.json();
+            loadingEl.remove();
+            appendChatMessage('agent', data.response || '(no response)');
+
+            if (data.model) {
+                currentModel = data.model;
+                renderTree();
+                var activeTab = document.querySelector('.tab-btn.active');
+                if (activeTab) {
+                    var tabName = activeTab.getAttribute('data-tab');
+                    if (tabName === 'links') renderLinksTab();
+                    if (tabName === 'instructions') renderInstructionsTab();
+                    if (tabName === 'json') renderJsonTab();
+                }
+            }
+        }
+    } catch (e) {
+        loadingEl.remove();
+        appendChatMessage('agent', 'Error: ' + e.message);
+    }
+
+    if (sendBtn) sendBtn.disabled = false;
+    input.focus();
+}
+
+function appendChatMessage(role, text, isLoading) {
+    var history = document.getElementById('chat-history');
+    var msg = el('div', {
+        className: 'chat-message chat-' + role + (isLoading ? ' chat-loading' : ''),
+        textContent: text,
+    });
+    history.appendChild(msg);
+    history.scrollTop = history.scrollHeight;
+    return msg;
+}
+
+// =============================================================================
+// 11. EXPORT
+// =============================================================================
+
+function toggleExportMenu() {
+    var menu = document.getElementById('export-menu');
+    if (!menu) return;
+    menu.style.display = menu.style.display === 'none' ? '' : 'none';
+}
+
+function exportModel(format) {
+    if (!currentJobId) {
+        showToast('No active model to export.', 'error');
+        return;
+    }
+    var url = '/job/' + currentJobId + '/export/' + format;
+    window.open(url, '_blank');
+    document.getElementById('export-menu').style.display = 'none';
+}
+
+// =============================================================================
+// 12. SETTINGS MODAL
+// =============================================================================
+
+function openSettings() {
+    var anthKey = document.getElementById('settings-anthropic-key');
+    var orKey = document.getElementById('settings-openrouter-key');
+    var localUrl = document.getElementById('settings-local-url');
+
+    if (anthKey) anthKey.value = '';
+    if (orKey) orKey.value = '';
+    if (localUrl) localUrl.value = CURRENT_SETTINGS.local_url || '';
+
+    var anthStatus = document.getElementById('anthropic-key-status');
+    var orStatus = document.getElementById('openrouter-key-status');
+    if (anthStatus) {
+        anthStatus.textContent = CURRENT_SETTINGS.has_anthropic_key ? 'Key configured' : 'No key set';
+        anthStatus.style.color = CURRENT_SETTINGS.has_anthropic_key ? '#5a5' : '#c88';
+    }
+    if (orStatus) {
+        orStatus.textContent = CURRENT_SETTINGS.has_openrouter_key ? 'Key configured' : 'No key set';
+        orStatus.style.color = CURRENT_SETTINGS.has_openrouter_key ? '#5a5' : '#888';
+    }
+
+    var modelSelect = document.getElementById('settings-model');
+    if (modelSelect && CURRENT_SETTINGS.model) {
+        modelSelect.value = CURRENT_SETTINGS.model;
+        showModelDetail(CURRENT_SETTINGS.model);
+    }
+
+    document.querySelectorAll('.modal-settings .segment[data-value]').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-value') === (CURRENT_SETTINGS.default_mode || 'capella'));
+    });
+
+    loadCostHistory();
+
+    document.getElementById('settings-modal').style.display = '';
+}
+
+function closeSettings() {
+    document.getElementById('settings-modal').style.display = 'none';
+}
+
+function setSettingsMode(mode) {
+    document.querySelectorAll('.modal-settings .segment[data-value]').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-value') === mode);
+    });
+}
+
+function showModelDetail(modelId) {
+    var panel = document.getElementById('model-detail-panel');
+    if (!panel) return;
+    clearChildren(panel);
+
+    var model = null;
+    if (Array.isArray(MODEL_CATALOGUE)) {
+        model = MODEL_CATALOGUE.find(function (m) { return m.id === modelId; });
+    }
+    if (!model) return;
+
+    if (model.description) {
+        panel.appendChild(el('div', { className: 'model-detail-desc', textContent: model.description }));
+    }
+
+    var rows = [
+        { label: 'Provider', value: model.provider },
+        { label: 'Price', value: model.price },
+    ];
+
+    if (model.pros && model.pros.length) {
+        rows.push({ label: 'Pros', value: model.pros.join(', ') });
+    }
+    if (model.cons && model.cons.length) {
+        rows.push({ label: 'Cons', value: model.cons.join(', ') });
+    }
+
+    rows.forEach(function (r) {
+        if (!r.value) return;
+        var row = el('div', { className: 'model-detail-row' });
+        row.appendChild(el('span', { className: 'model-detail-label', textContent: r.label + ': ' }));
+        row.appendChild(el('span', { textContent: r.value }));
+        panel.appendChild(row);
+    });
+}
+
+async function saveSettings() {
+    var body = {};
+
+    var anthKey = document.getElementById('settings-anthropic-key');
+    var orKey = document.getElementById('settings-openrouter-key');
+    var localUrl = document.getElementById('settings-local-url');
+    var modelSelect = document.getElementById('settings-model');
+
+    if (anthKey && anthKey.value.trim()) body.anthropic_key = anthKey.value.trim();
+    if (orKey && orKey.value.trim()) body.openrouter_key = orKey.value.trim();
+    if (localUrl && localUrl.value.trim()) body.local_url = localUrl.value.trim();
+    if (modelSelect) body.model = modelSelect.value;
+
+    var activeModeBtn = document.querySelector('.modal-settings .segment[data-value].active');
+    if (activeModeBtn) body.default_mode = activeModeBtn.getAttribute('data-value');
+
+    var activeProviderBtn = document.querySelector('#provider-selector .segment.active');
+    if (activeProviderBtn) body.provider = activeProviderBtn.getAttribute('data-provider');
+
+    try {
+        var res = await fetch('/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        var data = await res.json();
+        if (data.status === 'ok') {
+            if (body.model) CURRENT_SETTINGS.model = body.model;
+            if (body.provider) CURRENT_SETTINGS.provider = body.provider;
+            if (body.default_mode) CURRENT_SETTINGS.default_mode = body.default_mode;
+            if (body.anthropic_key) CURRENT_SETTINGS.has_anthropic_key = true;
+            if (body.openrouter_key) CURRENT_SETTINGS.has_openrouter_key = true;
+
+            closeSettings();
+            showToast('Settings saved.', 'success');
+        } else {
+            showToast('Failed to save settings.', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to save settings: ' + e.message, 'error');
+    }
+}
+
+async function loadCostHistory() {
+    var body = document.getElementById('cost-history-body');
+    if (!body) return;
+    clearChildren(body);
+    body.appendChild(document.createTextNode('Loading...'));
+
+    try {
+        var res = await fetch('/cost-history');
+        var data = await res.json();
+
+        clearChildren(body);
+
+        var summary = el('div', { className: 'cost-history-summary' });
+        summary.appendChild(el('div', { textContent: 'Total runs: ' + (data.total_runs || 0) }));
+        summary.appendChild(el('div', { textContent: 'Total spend: ' + formatCost(data.total_spend || 0) }));
+        summary.appendChild(el('div', { textContent: 'Average per run: ' + formatCost(data.avg_per_run || 0) }));
+        body.appendChild(summary);
+
+        if (data.runs && data.runs.length > 0) {
+            body.appendChild(el('div', { className: 'cost-history-subheader', textContent: 'Recent runs:' }));
+
+            data.runs.slice(-5).reverse().forEach(function (run) {
+                var row = el('div', { className: 'cost-history-row' });
+                var ts = run.timestamp ? new Date(run.timestamp).toLocaleString() : 'Unknown time';
+                var cost = run.totals ? formatCost(run.totals.cost_usd || 0) : '$0.00';
+                row.appendChild(el('span', { className: 'cost-hist-time', textContent: ts }));
+                row.appendChild(el('span', { className: 'cost-hist-cost', textContent: cost }));
+                body.appendChild(row);
+            });
+        }
+    } catch (e) {
+        clearChildren(body);
+        body.appendChild(document.createTextNode('Could not load cost history.'));
+    }
+}
+
+// =============================================================================
+// 13. GIT-BASED UPDATES
+// =============================================================================
+
+async function checkUpdatesQuietly() {
+    try {
+        var res = await fetch('/check-updates');
+        var data = await res.json();
+
+        if (data.available) {
+            var updateBtn = document.getElementById('update-btn');
+            if (updateBtn) {
+                updateBtn.textContent = 'Update (' + data.behind + ')';
+                updateBtn.classList.add('update-available');
+                updateBtn.onclick = checkAndUpdate;
+            }
+        }
+    } catch (e) {
+        // Silently ignore
+    }
+}
+
+async function checkAndUpdate() {
+    var btn = document.getElementById('update-btn');
+    if (!btn) return;
+
+    btn.textContent = 'Checking...';
+    btn.disabled = true;
+
+    try {
+        var res = await fetch('/check-updates');
+        var data = await res.json();
+
+        if (data.error) {
+            showToast(data.error, 'error');
+            btn.textContent = 'Update';
+            btn.disabled = false;
+            return;
+        }
+
+        if (data.available) {
+            showUpdateBanner(data.behind, data.commits || []);
+            btn.textContent = 'Update (' + data.behind + ')';
+            btn.disabled = false;
+        } else {
+            showToast('Already up to date.', 'success');
+            btn.textContent = 'Update';
+            btn.disabled = false;
+        }
+    } catch (e) {
+        showToast('Could not check for updates.', 'error');
+        btn.textContent = 'Update';
+        btn.disabled = false;
+    }
+}
+
+function showUpdateBanner(count, commits) {
+    var existing = document.getElementById('update-banner');
+    if (existing) existing.remove();
+
+    var banner = el('div', { className: 'update-banner update-banner-pulse', id: 'update-banner' });
+
+    var text = el('span', { className: 'update-banner-text', id: 'update-banner-text' });
+    text.appendChild(document.createTextNode(count + ' update(s) available'));
+
+    if (commits && commits.length > 0) {
+        var ul = document.createElement('ul');
+        ul.className = 'update-commit-list';
+        commits.slice(0, 5).forEach(function (msg) {
+            ul.appendChild(el('li', { textContent: msg }));
+        });
+        text.appendChild(ul);
+    }
+
+    var updateNowBtn = el('button', { className: 'btn-primary btn-update-now', textContent: 'Update Now' });
+    updateNowBtn.addEventListener('click', function () {
+        installUpdateFromBanner(banner);
+    });
+
+    banner.appendChild(text);
+    banner.appendChild(updateNowBtn);
+
+    document.body.insertBefore(banner, document.body.firstChild);
+}
+
+async function installUpdateFromBanner(banner) {
+    var textEl = banner.querySelector('.update-banner-text');
+    if (textEl) {
+        clearChildren(textEl);
+        textEl.appendChild(document.createTextNode('Updating...'));
+    }
+
+    try {
+        var res = await fetch('/update', { method: 'POST' });
+        var data = await res.json();
+
+        if (data.status === 'ok' && data.updated) {
+            // Show restart notice — do NOT auto-dismiss
+            if (textEl) {
+                clearChildren(textEl);
+                textEl.appendChild(document.createTextNode(
+                    'Update applied! Please restart the server to activate changes.'
+                ));
+            }
+            var nowBtn = banner.querySelector('.btn-update-now');
+            if (nowBtn) nowBtn.remove();
+        } else if (data.status === 'ok') {
+            if (textEl) {
+                clearChildren(textEl);
+                textEl.appendChild(document.createTextNode(data.message || 'Already up to date.'));
+            }
+            setTimeout(function () { if (banner.parentNode) banner.remove(); }, 3000);
+        } else {
+            if (textEl) {
+                clearChildren(textEl);
+                textEl.appendChild(document.createTextNode('Update failed: ' + (data.message || 'unknown error')));
+            }
+        }
+    } catch (e) {
+        if (textEl) {
+            clearChildren(textEl);
+            textEl.appendChild(document.createTextNode('Update failed.'));
+        }
+    }
+}
+
+// =============================================================================
+// 14. CLARIFICATION FLOW
+// =============================================================================
+
+function showClarificationModal(flaggedItems) {
+    var container = document.getElementById('clarify-items');
+    if (!container) return;
+    clearChildren(container);
+
+    flaggedItems.forEach(function (item) {
+        var itemDiv = el('div', { className: 'clarify-item' });
+
+        itemDiv.appendChild(el('span', { className: 'clarify-req-id', textContent: item.id || item.req_id || '' }));
+        itemDiv.appendChild(el('p', { className: 'clarify-req-text', textContent: item.text || '' }));
+        itemDiv.appendChild(el('p', { className: 'clarify-issue', textContent: 'Issue: ' + (item.issue || item.problem || '') }));
+
+        if (item.suggestion) {
+            itemDiv.appendChild(el('p', { className: 'clarify-suggestion', textContent: 'Suggestion: ' + item.suggestion }));
+        }
+
+        itemDiv.appendChild(el('label', { textContent: 'Your clarification:' }));
+
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'clarify-input';
+        input.placeholder = item.suggestion || 'Enter clarification...';
+        input.setAttribute('data-req-id', item.id || item.req_id || '');
+        itemDiv.appendChild(input);
+
+        container.appendChild(itemDiv);
+    });
+
+    document.getElementById('clarify-modal').style.display = '';
+}
+
+function submitClarifications() {
+    var inputs = document.querySelectorAll('#clarify-items .clarify-input');
+    var clarifications = {};
+    inputs.forEach(function (input) {
+        var reqId = input.getAttribute('data-req-id');
+        var value = input.value.trim();
+        if (reqId && value) {
+            clarifications[reqId] = value;
+        }
+    });
+
+    document.getElementById('clarify-modal').style.display = 'none';
+    proceedGenerate(clarifications);
+}
+
+// =============================================================================
+// 15. TOAST NOTIFICATIONS
+// =============================================================================
+
+function showToast(message, type) {
+    type = type || 'info';
+    var toast = document.createElement('div');
+    toast.className = 'toast toast-' + type;
+    toast.textContent = message;
+    document.getElementById('toast-container').appendChild(toast);
+    setTimeout(function () { toast.remove(); }, 4000);
+}
+
+// =============================================================================
+// 16. UTILITY FUNCTIONS
+// =============================================================================
+
+function formatCost(amount) {
+    if (typeof amount !== 'number') amount = parseFloat(amount) || 0;
+    if (amount === 0) return '$0.00';
+    if (amount < 0.001) return '$' + amount.toFixed(6);
+    if (amount < 0.01) return '$' + amount.toFixed(4);
+    return '$' + amount.toFixed(4);
+}
+
+function formatTokens(count) {
+    if (typeof count !== 'number') count = parseInt(count) || 0;
+    return count.toLocaleString();
+}
+
+function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () {
+            showToast('Copied to clipboard.', 'success');
+        }).catch(function () {
+            _fallbackCopy(text);
+        });
+    } else {
+        _fallbackCopy(text);
+    }
+}
+
+function _fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand('copy');
+        showToast('Copied to clipboard.', 'success');
+    } catch (e) {
+        showToast('Could not copy to clipboard.', 'error');
+    }
+    ta.remove();
+}
+
+// Safe DOM element creator — all text set via textContent, never innerHTML
+function el(tag, attrs, children) {
+    var elem = document.createElement(tag);
+    if (attrs) {
+        Object.keys(attrs).forEach(function (key) {
+            if (key === 'textContent') {
+                elem.textContent = attrs[key];
+            } else if (key === 'className') {
+                elem.className = attrs[key];
+            } else if (key === 'onclick') {
+                elem.addEventListener('click', attrs[key]);
+            } else if (key === 'style') {
+                elem.setAttribute('style', attrs[key]);
+            } else {
+                elem.setAttribute(key, attrs[key]);
+            }
+        });
+    }
+    if (children) {
+        children.forEach(function (child) {
+            if (typeof child === 'string') {
+                elem.appendChild(document.createTextNode(child));
+            } else if (child) {
+                elem.appendChild(child);
+            }
+        });
+    }
+    return elem;
+}
+
+// Safe way to empty a DOM node without innerHTML
+function clearChildren(node) {
+    while (node.firstChild) {
+        node.removeChild(node.firstChild);
+    }
+}

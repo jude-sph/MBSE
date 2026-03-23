@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MBSE Model Generator</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <!-- Top Bar -->
+    <header id="top-bar">
+        <div class="header-left">
+            <span class="app-title">MBSE Generator</span>
+            <span class="version">v{{ version }}</span>
+        </div>
+        <div class="header-right">
+            <button class="btn-icon" id="settings-btn" onclick="openSettings()" title="Settings">&#9881; Settings</button>
+            <button class="btn-update" id="update-btn" onclick="checkAndUpdate()">Update</button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="main-content">
+
+        <!-- Left Panel -->
+        <aside id="left-panel">
+
+            <!-- Mode Toggle -->
+            <div class="panel-section" id="mode-toggle-section">
+                <div class="section-label">Mode</div>
+                <div id="mode-toggle" class="segment-control">
+                    <button class="segment active" data-mode="capella" onclick="setMode('capella')">Capella</button>
+                    <button class="segment" data-mode="rhapsody" onclick="setMode('rhapsody')">Rhapsody</button>
+                </div>
+            </div>
+
+            <!-- Layer / Diagram Selection -->
+            <div class="panel-section" id="layer-selection">
+                <div class="section-label">Layers</div>
+
+                <div id="capella-layers" class="layer-group">
+                    {% for key, name in capella_layers.items() %}
+                    <label class="layer-checkbox">
+                        <input type="checkbox" value="{{ key }}" checked> {{ name }}
+                    </label>
+                    {% endfor %}
+                </div>
+
+                <div id="rhapsody-diagrams" class="layer-group" style="display:none">
+                    {% for key, name in rhapsody_diagrams.items() %}
+                    <label class="layer-checkbox">
+                        <input type="checkbox" value="{{ key }}" checked> {{ name }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- File Upload -->
+            <div class="panel-section" id="upload-section">
+                <div class="section-label">Requirements File</div>
+                <div id="upload-zone" class="upload-zone"
+                     onclick="document.getElementById('file-input').click()"
+                     ondragover="handleDragOver(event)"
+                     ondragleave="handleDragLeave(event)"
+                     ondrop="handleDrop(event)">
+                    <div class="upload-icon">&#128196;</div>
+                    <div class="upload-primary">Drop XLSX or CSV here</div>
+                    <div class="upload-secondary">or click to browse</div>
+                    <input type="file" id="file-input" accept=".xlsx,.xls,.csv"
+                           style="display:none" onchange="handleFileSelect(this)">
+                </div>
+                <div id="file-status" class="file-status" style="display:none">
+                    <span id="file-name" class="file-name"></span>
+                    <span id="req-count" class="req-count"></span>
+                </div>
+            </div>
+
+            <!-- LLM Provider -->
+            <div class="panel-section" id="provider-section">
+                <div class="section-label">LLM Provider</div>
+                <div id="provider-selector" class="segment-control">
+                    <button class="segment" data-provider="anthropic" onclick="setProvider('anthropic')">Anthropic</button>
+                    <button class="segment" data-provider="openrouter" onclick="setProvider('openrouter')">OpenRouter</button>
+                    <button class="segment" data-provider="local" onclick="setProvider('local')">Local</button>
+                </div>
+            </div>
+
+            <!-- Generate Button -->
+            <div class="panel-section">
+                <button id="generate-btn" class="btn-generate" onclick="startGenerate()" disabled>
+                    &#9654; Generate Model
+                </button>
+            </div>
+
+        </aside>
+
+        <!-- Right Panel -->
+        <section id="right-panel">
+
+            <!-- Tab Bar -->
+            <div id="tab-bar" class="tab-bar">
+                <div class="tab-buttons">
+                    <button class="tab-btn active" data-tab="tree" onclick="switchTab('tree')">Model Tree</button>
+                    <button class="tab-btn" data-tab="links" onclick="switchTab('links')">Links</button>
+                    <button class="tab-btn" data-tab="instructions" onclick="switchTab('instructions')">Instructions</button>
+                    <button class="tab-btn" data-tab="json" onclick="switchTab('json')">Raw JSON</button>
+                </div>
+                <div class="tab-actions">
+                    <div class="export-dropdown">
+                        <button class="btn-export" onclick="toggleExportMenu()">
+                            &#8659; Export &#9660;
+                        </button>
+                        <div id="export-menu" class="export-menu" style="display:none">
+                            <button onclick="exportModel('json')">Export JSON</button>
+                            <button onclick="exportModel('xlsx')">Export XLSX</button>
+                            <button onclick="exportModel('text')">Export Text</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Content -->
+            <div id="tab-content" class="tab-content">
+
+                <div id="tab-tree" class="tab-pane active">
+                    <!-- Collapsible model tree rendered by app.js -->
+                </div>
+
+                <div id="tab-links" class="tab-pane" style="display:none">
+                    <table id="links-table" class="links-table">
+                        <thead>
+                            <tr>
+                                <th>Source</th>
+                                <th>Type</th>
+                                <th>Target</th>
+                            </tr>
+                        </thead>
+                        <tbody id="links-tbody">
+                            <!-- Populated by app.js -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="tab-instructions" class="tab-pane" style="display:none">
+                    <ol id="instructions-list" class="instructions-list">
+                        <!-- Populated by app.js -->
+                    </ol>
+                </div>
+
+                <div id="tab-json" class="tab-pane" style="display:none">
+                    <pre id="json-output" class="json-output"></pre>
+                </div>
+
+            </div>
+
+            <!-- Progress Area -->
+            <div id="progress-area" class="progress-area" style="display:none">
+                <div class="progress-header">
+                    <span class="progress-title">Generating Model...</span>
+                    <span id="running-cost" class="running-cost"></span>
+                </div>
+                <div id="pipeline-stages" class="pipeline-stages">
+                    <!-- Stage progress bars rendered by app.js -->
+                </div>
+                <div class="progress-footer">
+                    <button class="btn-cancel" onclick="cancelJob()">Cancel</button>
+                </div>
+            </div>
+
+            <!-- Chat Agent Panel -->
+            <div id="chat-panel" class="chat-panel collapsed">
+                <div class="chat-header" onclick="toggleChat()">
+                    <span class="chat-title">Chat Agent</span>
+                    <span id="chat-toggle-arrow" class="chat-arrow">&#8963;</span>
+                </div>
+                <div id="chat-body" class="chat-body" style="display:none">
+                    <div id="chat-history" class="chat-history">
+                        <!-- Messages appended by app.js -->
+                    </div>
+                    <div class="chat-input-row">
+                        <input type="text" id="chat-input" class="chat-input"
+                               placeholder="Ask about the model..."
+                               onkeydown="if(event.key==='Enter') sendChat()">
+                        <button class="btn-send" onclick="sendChat()">Send</button>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal" style="display:none">
+        <div class="modal-content modal-settings">
+            <div class="modal-header">
+                <h3>Settings</h3>
+                <button class="btn-icon" onclick="closeSettings()">&#x2715;</button>
+            </div>
+            <div class="modal-body">
+
+                <div class="form-group">
+                    <label>Anthropic API Key</label>
+                    <input type="password" id="settings-anthropic-key" placeholder="sk-ant-...">
+                    <small id="anthropic-key-status" class="key-status"></small>
+                </div>
+
+                <div class="form-group">
+                    <label>OpenRouter API Key</label>
+                    <input type="password" id="settings-openrouter-key" placeholder="sk-or-...">
+                    <small id="openrouter-key-status" class="key-status"></small>
+                </div>
+
+                <div class="form-group">
+                    <label>Local LLM URL</label>
+                    <input type="text" id="settings-local-url" placeholder="http://localhost:11434">
+                </div>
+
+                <div class="form-group">
+                    <label>Model</label>
+                    <select id="settings-model" class="model-select">
+                        {% for m in model_catalogue %}
+                        <option value="{{ m.id }}" data-provider="{{ m.provider }}">
+                            {{ m.name }} — {{ m.price }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <div id="model-detail-panel" class="model-detail-panel"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>Default Mode</label>
+                    <div class="segment-control">
+                        <button class="segment" data-value="capella" onclick="setSettingsMode('capella')">Capella</button>
+                        <button class="segment" data-value="rhapsody" onclick="setSettingsMode('rhapsody')">Rhapsody</button>
+                    </div>
+                </div>
+
+                <div class="form-group" id="cost-history-section">
+                    <label>Cost History</label>
+                    <div id="cost-history-body" class="cost-history-body">
+                        <!-- Populated by app.js on modal open -->
+                    </div>
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeSettings()">Cancel</button>
+                <button class="btn-primary" onclick="saveSettings()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cost Confirmation Modal -->
+    <div id="cost-modal" class="modal" style="display:none">
+        <div class="modal-content modal-cost">
+            <div class="modal-header">
+                <h3>Confirm Generation</h3>
+                <button class="btn-icon" onclick="closeCostModal()">&#x2715;</button>
+            </div>
+            <div class="modal-body">
+                <div class="cost-summary">
+                    <div class="cost-row">
+                        <span class="cost-label">Model</span>
+                        <span id="cost-model-name" class="cost-value"></span>
+                    </div>
+                    <div class="cost-row">
+                        <span class="cost-label">Estimated API calls</span>
+                        <span id="cost-calls" class="cost-value"></span>
+                    </div>
+                    <div class="cost-row">
+                        <span class="cost-label">Estimated cost</span>
+                        <span id="cost-range" class="cost-value cost-highlight"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeCostModal()">Cancel</button>
+                <button class="btn-primary btn-green" id="cost-proceed-btn" onclick="proceedGenerate()">Proceed</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clarification Modal -->
+    <div id="clarify-modal" class="modal" style="display:none">
+        <div class="modal-content modal-clarify">
+            <div class="modal-header">
+                <h3>Clarification Needed</h3>
+            </div>
+            <div class="modal-body">
+                <p class="clarify-intro">Some requirements need clarification before generation can proceed:</p>
+                <div id="clarify-items" class="clarify-items">
+                    <!-- Items rendered by app.js:
+                         Each item: flagged requirement text + question + text input -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary btn-green" onclick="submitClarifications()">Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Data for JavaScript -->
+    <script>
+        const MODEL_CATALOGUE = {{ model_catalogue | tojson }};
+        const CAPELLA_LAYERS = {{ capella_layers | tojson }};
+        const RHAPSODY_DIAGRAMS = {{ rhapsody_diagrams | tojson }};
+        const CURRENT_SETTINGS = {{ settings | tojson }};
+    </script>
+    <script src="/static/app.js"></script>
+
+</body>
+</html>
