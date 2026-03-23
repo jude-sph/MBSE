@@ -8,6 +8,7 @@ import sys
 import tempfile
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -171,12 +172,20 @@ async def run(request: Request):
     provider = body.get("provider", config.PROVIDER)
     clarifications = body.get("clarifications") or None
 
+    # Feature 2: filter requirements by selected IDs if provided
+    selected_req_ids = body.get("selected_requirements")
+    reqs = list(parsed_requirements)
+    if selected_req_ids:
+        reqs = [r for r in reqs if r.id in set(selected_req_ids)]
+    if not reqs:
+        raise HTTPException(400, "No requirements selected. Check your requirement selection.")
+
     if not selected_layers:
         raise HTTPException(400, "No layers selected.")
 
     job = Job(
         id=str(uuid.uuid4())[:8],
-        requirements=list(parsed_requirements),
+        requirements=reqs,
         settings={
             "mode": mode,
             "selected_layers": selected_layers,
@@ -347,12 +356,19 @@ async def export_job(job_id: str, fmt: str):
     export_dir = config.OUTPUT_DIR / "exports"
     export_dir.mkdir(parents=True, exist_ok=True)
 
+    # Feature 4: smarter export filenames
+    source_stem = Path(job.model.meta.source_file).stem if job.model.meta.source_file else "mbse"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M")
+    mode = job.model.meta.mode or "model"
+    ext = "txt" if fmt == "text" else fmt
+    filename = f"{source_stem}-{mode}-{timestamp}.{ext}"
+
     if fmt == "json":
         out_path = export_dir / f"{job_id}_model.json"
         export_json(job.model, out_path)
         return FileResponse(
             out_path,
-            filename=f"mbse_model_{job_id}.json",
+            filename=filename,
             media_type="application/json",
         )
     elif fmt == "xlsx":
@@ -360,7 +376,7 @@ async def export_job(job_id: str, fmt: str):
         export_xlsx(job.model, out_path)
         return FileResponse(
             out_path,
-            filename=f"mbse_model_{job_id}.xlsx",
+            filename=filename,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:  # text
@@ -368,7 +384,7 @@ async def export_job(job_id: str, fmt: str):
         export_text(job.model, out_path)
         return FileResponse(
             out_path,
-            filename=f"mbse_model_{job_id}.txt",
+            filename=filename,
             media_type="text/plain",
         )
 

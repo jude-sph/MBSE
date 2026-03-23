@@ -75,6 +75,24 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Check for updates quietly on page load
     checkUpdatesQuietly();
+
+    // Feature 1: Session Persistence — restore saved model on load
+    var saved = localStorage.getItem('mbse_currentModel');
+    if (saved) {
+        try {
+            currentModel = JSON.parse(saved);
+            currentJobId = localStorage.getItem('mbse_currentJobId') || 'restored';
+            renderTree();
+            renderCoverageIndicator();
+            switchTab('tree');
+            showToast('Previous session restored.', 'info');
+            var clearBtn = document.getElementById('clear-session-btn');
+            if (clearBtn) clearBtn.style.display = '';
+        } catch(e) {
+            localStorage.removeItem('mbse_currentModel');
+            localStorage.removeItem('mbse_currentJobId');
+        }
+    }
 });
 
 // =============================================================================
@@ -168,12 +186,67 @@ async function processFile(file) {
         // Enable generate button
         document.getElementById('generate-btn').disabled = false;
 
+        // Feature 2: populate requirement preview list
+        populateReqPreview(parsedRequirements);
+
         showToast('Loaded ' + parsedRequirements.length + ' requirements from ' + file.name, 'success');
     } catch (e) {
         showToast('Upload failed: ' + e.message, 'error');
     }
 
     zone.classList.remove('uploading');
+}
+
+// =============================================================================
+// 4b. REQUIREMENT PREVIEW (Feature 2)
+// =============================================================================
+
+function populateReqPreview(reqs) {
+    var section = document.getElementById('req-preview-section');
+    var list = document.getElementById('req-preview-list');
+    if (!section || !list) return;
+
+    clearChildren(list);
+
+    reqs.forEach(function(req) {
+        var item = el('div', { className: 'req-preview-item' });
+
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'req-checkbox';
+        cb.value = req.id;
+        cb.checked = true;
+        cb.addEventListener('change', updateReqSelectedCount);
+
+        var idSpan = el('span', { className: 'req-preview-id', textContent: req.id });
+        var textSpan = el('span', { className: 'req-preview-text', textContent: req.text || '' });
+        if (req.text) textSpan.title = req.text;
+
+        item.appendChild(cb);
+        item.appendChild(idSpan);
+        item.appendChild(textSpan);
+        list.appendChild(item);
+    });
+
+    section.style.display = '';
+    updateReqSelectedCount();
+}
+
+function updateReqSelectedCount() {
+    var total = document.querySelectorAll('#req-preview-list .req-checkbox').length;
+    var checked = document.querySelectorAll('#req-preview-list .req-checkbox:checked').length;
+    var countEl = document.getElementById('req-selected-count');
+    if (countEl) countEl.textContent = checked + ' of ' + total + ' selected';
+}
+
+function reqSelectAll() {
+    document.querySelectorAll('#req-preview-list .req-checkbox').forEach(function(cb) { cb.checked = true; });
+    updateReqSelectedCount();
+}
+
+function reqDeselectAll() {
+    document.querySelectorAll('#req-preview-list .req-checkbox').forEach(function(cb) { cb.checked = false; });
+    updateReqSelectedCount();
 }
 
 // =============================================================================
@@ -275,6 +348,20 @@ async function proceedGenerate(clarifications) {
 
     if (clarifications) {
         settings.clarifications = clarifications;
+    }
+
+    // Feature 1: clear stale session before new run
+    localStorage.removeItem('mbse_currentModel');
+    localStorage.removeItem('mbse_currentJobId');
+    var clearBtn = document.getElementById('clear-session-btn');
+    if (clearBtn) clearBtn.style.display = 'none';
+
+    // Feature 2: attach selected requirement IDs
+    var checkedBoxes = document.querySelectorAll('#req-preview-list .req-checkbox:checked');
+    if (checkedBoxes.length > 0) {
+        var selectedIds = [];
+        checkedBoxes.forEach(function(cb) { selectedIds.push(cb.value); });
+        settings.selected_requirements = selectedIds;
     }
 
     try {
@@ -476,8 +563,16 @@ async function fetchAndDisplayModel(jobId) {
             return;
         }
         currentModel = await res.json();
+        // Feature 1: persist to localStorage
+        try {
+            localStorage.setItem('mbse_currentModel', JSON.stringify(currentModel));
+            localStorage.setItem('mbse_currentJobId', currentJobId);
+            var clearBtn = document.getElementById('clear-session-btn');
+            if (clearBtn) clearBtn.style.display = '';
+        } catch(e) { /* storage quota exceeded — ignore */ }
         hideProgressArea();
         renderTree();
+        renderCoverageIndicator();
         switchTab('tree');
         showToast('Model generated successfully!', 'success');
     } catch (e) {
@@ -715,6 +810,27 @@ function toggleElementDetails(row, elem) {
         var empty = el('div', { className: 'detail-field' });
         empty.appendChild(el('span', { className: 'detail-value', textContent: 'No additional properties' }));
         details.appendChild(empty);
+    }
+
+    // Feature 3: Traceability section
+    var relatedLinks = (currentModel && currentModel.links || []).filter(function(link) {
+        return link.source === elem.id || link.target === elem.id;
+    });
+    if (relatedLinks.length > 0) {
+        var traceHeader = el('div', { className: 'detail-trace-header', textContent: 'Traceability' });
+        details.appendChild(traceHeader);
+        relatedLinks.forEach(function(link) {
+            var traceRow = el('div', { className: 'detail-trace-row' });
+            if (link.source === elem.id) {
+                traceRow.textContent = '\u2192 ' + link.type + ' \u2192 ' + link.target;
+            } else {
+                traceRow.textContent = '\u2190 ' + link.type + ' \u2190 ' + link.source;
+            }
+            if (link.description) {
+                traceRow.title = link.description;
+            }
+            details.appendChild(traceRow);
+        });
     }
 
     row.parentNode.insertBefore(details, row.nextSibling);
@@ -1140,7 +1256,13 @@ async function sendChat() {
 
             if (data.model) {
                 currentModel = data.model;
+                // Feature 1: persist updated model after chat
+                try {
+                    localStorage.setItem('mbse_currentModel', JSON.stringify(currentModel));
+                    localStorage.setItem('mbse_currentJobId', currentJobId);
+                } catch(e) { /* ignore */ }
                 renderTree();
+                renderCoverageIndicator();
                 var activeTab = document.querySelector('.tab-btn.active');
                 if (activeTab) {
                     var tabName = activeTab.getAttribute('data-tab');
@@ -1173,6 +1295,26 @@ function appendChatMessage(role, text, isLoading) {
 // =============================================================================
 // 11. EXPORT
 // =============================================================================
+
+function clearSession() {
+    localStorage.removeItem('mbse_currentModel');
+    localStorage.removeItem('mbse_currentJobId');
+    currentModel = null;
+    currentJobId = null;
+    var container = document.getElementById('tab-tree');
+    if (container) {
+        clearChildren(container);
+        container.appendChild(el('div', {
+            className: 'empty-state',
+            textContent: 'No model loaded. Generate a model first.',
+        }));
+    }
+    var indicator = document.getElementById('coverage-indicator');
+    if (indicator) indicator.style.display = 'none';
+    var clearBtn = document.getElementById('clear-session-btn');
+    if (clearBtn) clearBtn.style.display = 'none';
+    showToast('Session cleared.', 'info');
+}
 
 function toggleExportMenu() {
     var menu = document.getElementById('export-menu');
@@ -1628,7 +1770,53 @@ function showErrorPopup(title, detail) {
 }
 
 // =============================================================================
-// 16. UTILITY FUNCTIONS
+// 16. COVERAGE INDICATOR (Feature 5)
+// =============================================================================
+
+function renderCoverageIndicator() {
+    var indicator = document.getElementById('coverage-indicator');
+    if (!indicator) return;
+    clearChildren(indicator);
+
+    if (!currentModel || !currentModel.requirements || !currentModel.links) {
+        indicator.style.display = 'none';
+        return;
+    }
+
+    var totalReqs = currentModel.requirements.length;
+    if (totalReqs === 0) {
+        indicator.style.display = 'none';
+        return;
+    }
+
+    var linkedReqIds = new Set();
+    currentModel.links.forEach(function(link) {
+        currentModel.requirements.forEach(function(req) {
+            if (link.target === req.id || link.source === req.id) {
+                linkedReqIds.add(req.id);
+            }
+        });
+    });
+    var covered = linkedReqIds.size;
+    var pct = Math.round((covered / totalReqs) * 100);
+
+    indicator.style.display = '';
+
+    var label = el('span', { className: 'coverage-label', textContent: 'Requirement Coverage' });
+    var stats = el('span', { className: 'coverage-stats', textContent: covered + '/' + totalReqs + ' (' + pct + '%)' });
+    var barTrack = el('div', { className: 'coverage-bar-track' });
+    var barFill = el('div', { className: 'coverage-bar-fill' });
+    barFill.style.width = pct + '%';
+    if (pct === 100) barFill.classList.add('full');
+    barTrack.appendChild(barFill);
+
+    indicator.appendChild(label);
+    indicator.appendChild(stats);
+    indicator.appendChild(barTrack);
+}
+
+// =============================================================================
+// 17. UTILITY FUNCTIONS
 // =============================================================================
 
 function formatCost(amount) {
