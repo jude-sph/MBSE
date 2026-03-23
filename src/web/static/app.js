@@ -1124,15 +1124,25 @@ function renderBatchesTab() {
         return;
     }
 
+    // Build a lookup of requirement ID -> requirement object
+    var reqLookup = {};
+    if (currentModel.requirements) {
+        currentModel.requirements.forEach(function(r) { reqLookup[r.id] = r; });
+    }
+
     // Render newest first
     var batches = currentModel.batches.slice().reverse();
     batches.forEach(function(batch) {
         var card = el('div', {className: 'batch-card'});
 
         var header = el('div', {className: 'batch-card-header'});
-        header.appendChild(el('span', {className: 'batch-id', textContent: batch.id}));
+        var headerLeft = el('div', {className: 'batch-header-left'});
+        headerLeft.appendChild(el('span', {className: 'batch-id', textContent: batch.id}));
         var ts = new Date(batch.timestamp);
-        header.appendChild(el('span', {className: 'batch-time', textContent: ts.toLocaleString()}));
+        headerLeft.appendChild(el('span', {className: 'batch-time', textContent: ts.toLocaleString()}));
+        header.appendChild(headerLeft);
+        var expandArrow = el('span', {className: 'batch-expand-arrow', textContent: '\u25b8'});
+        header.appendChild(expandArrow);
         card.appendChild(header);
 
         var meta = el('div', {className: 'batch-card-meta'});
@@ -1145,6 +1155,37 @@ function renderBatchesTab() {
         stats.appendChild(el('span', {className: 'batch-model', textContent: batch.model}));
         stats.appendChild(el('span', {className: 'batch-cost', textContent: '$' + batch.cost.toFixed(4)}));
         card.appendChild(stats);
+
+        // Expandable requirements detail
+        var detailDiv = el('div', {className: 'batch-detail', style: 'display:none'});
+        var detailHeader = el('div', {className: 'batch-detail-header', textContent: 'Requirements in this batch'});
+        detailDiv.appendChild(detailHeader);
+
+        if (batch.requirement_ids && batch.requirement_ids.length > 0) {
+            batch.requirement_ids.forEach(function(reqId) {
+                var row = el('div', {className: 'batch-req-row'});
+                row.appendChild(el('span', {className: 'batch-req-id', textContent: reqId}));
+                var req = reqLookup[reqId];
+                var text = req ? req.text : '(requirement text not available)';
+                var textSpan = el('span', {className: 'batch-req-text', textContent: text});
+                textSpan.title = text;
+                row.appendChild(textSpan);
+                detailDiv.appendChild(row);
+            });
+        } else {
+            detailDiv.appendChild(el('div', {className: 'batch-req-row', textContent: 'No requirement IDs recorded.'}));
+        }
+
+        card.appendChild(detailDiv);
+
+        // Toggle expand on card click
+        header.style.cursor = 'pointer';
+        header.addEventListener('click', function() {
+            var showing = detailDiv.style.display !== 'none';
+            detailDiv.style.display = showing ? 'none' : '';
+            expandArrow.textContent = showing ? '\u25b8' : '\u25be';
+            card.classList.toggle('batch-card-expanded', !showing);
+        });
 
         container.appendChild(card);
     });
