@@ -130,6 +130,48 @@ document.addEventListener('DOMContentLoaded', function () {
         unlockModeToggle();
         showToast('New project created.', 'success');
     });
+
+    // Open Project button
+    document.getElementById('btn-open-project').addEventListener('click', function() {
+        document.getElementById('open-project-input').click();
+    });
+
+    document.getElementById('open-project-input').addEventListener('change', async function() {
+        var file = this.files[0];
+        if (!file) return;
+        this.value = '';
+
+        var formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            var res = await fetch('/project/open', { method: 'POST', body: formData });
+            if (!res.ok) {
+                var err = await res.json();
+                showToast(err.detail || 'Failed to open project', 'error');
+                return;
+            }
+            var data = await res.json();
+            currentModel = data;
+            currentJobId = 'project';
+            renderTree();
+            renderCoverageIndicator();
+            updateProjectUI();
+            switchTab('tree');
+            showToast('Project "' + (data.project.name || 'Untitled') + '" loaded.', 'success');
+        } catch (e) {
+            showToast('Failed to open project: ' + e.message, 'error');
+        }
+    });
+
+    // Save Project As button
+    document.getElementById('btn-save-project').addEventListener('click', function() {
+        if (!currentModel || !currentModel.project) {
+            showToast('No project to save.', 'error');
+            return;
+        }
+        window.open('/project/download', '_blank');
+    });
 });
 
 // =============================================================================

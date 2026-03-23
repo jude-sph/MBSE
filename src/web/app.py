@@ -201,6 +201,56 @@ async def get_batches():
 
 
 # ---------------------------------------------------------------------------
+# POST /project/open — Load a project from an uploaded JSON file
+# ---------------------------------------------------------------------------
+
+@app.post("/project/open")
+async def open_project(file: UploadFile = File(...)):
+    global current_project
+
+    if not file.filename or not file.filename.endswith(".json"):
+        raise HTTPException(400, "Please upload a .json project file")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = Path(tmp.name)
+
+    try:
+        loaded = load_project(tmp_path)
+        if loaded is None:
+            raise HTTPException(400, "Could not parse project file. Is it a valid MBSE project?")
+
+        # Backup current project if it has data
+        if current_project and (current_project.batches or current_project.requirements):
+            backup_project()
+
+        current_project = loaded
+        save_project(current_project)
+        return current_project.model_dump()
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# GET /project/download — Download current project as a JSON file
+# ---------------------------------------------------------------------------
+
+@app.get("/project/download")
+async def download_project():
+    if not current_project:
+        raise HTTPException(400, "No active project to download")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w", encoding="utf-8") as tmp:
+        data = json.loads(current_project.model_dump_json())
+        json.dump(data, tmp, indent=2, default=str)
+        tmp_path = Path(tmp.name)
+
+    project_name = current_project.project.name or "project"
+    filename = project_name.lower().replace(" ", "-") + ".json"
+    return FileResponse(tmp_path, filename=filename, media_type="application/json")
+
+
+# ---------------------------------------------------------------------------
 # POST /estimate
 # ---------------------------------------------------------------------------
 
