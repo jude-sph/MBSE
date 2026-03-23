@@ -1438,6 +1438,57 @@ body {
 
 .coverage-bar-fill.full { background: #4ade80; }
 
+.coverage-toggle {
+    background: none;
+    border: 1px solid #3a2020;
+    color: #f59e0b;
+    font-size: 11px;
+    padding: 2px 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    margin-left: 8px;
+    transition: all 0.15s;
+}
+.coverage-toggle:hover { border-color: #5a3030; color: #fbbf24; background: #1a1010; }
+
+.coverage-details {
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: #0a0a14;
+    border: 1px solid #1e1e3a;
+    border-radius: 6px;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.coverage-uncovered-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid #111128;
+    font-size: 11px;
+}
+.coverage-uncovered-row:last-child { border-bottom: none; }
+
+.coverage-uncovered-id {
+    color: #f59e0b;
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 10px;
+    flex-shrink: 0;
+    background: #1a1508;
+    padding: 1px 6px;
+    border-radius: 3px;
+}
+
+.coverage-uncovered-text {
+    color: #888;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ── Responsive (narrow viewports) ──────────────────────── */
 
 @media (max-width: 700px) {
