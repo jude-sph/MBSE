@@ -81,7 +81,7 @@ Each layer prompt receives two new sections:
 
 The prompt instruction changes to: "Generate NEW elements for the requirements below. Reuse existing elements by referencing their IDs where appropriate. Do NOT regenerate or duplicate existing elements. Only output new elements."
 
-After generation, new elements are appended to the existing layer data. Element IDs must not collide with existing ones -- the prompt should instruct the LLM to continue the numbering sequence (e.g., if OE-004 exists, start at OE-005).
+After generation, new elements are appended to the existing layer data. Element IDs must not collide with existing ones. The prompt instructs the LLM to continue the numbering sequence, but as a safety net the backend runs a post-processing pass that detects any ID collisions and renames duplicates before merging (e.g., if the LLM produces OE-001 but that already exists, rename it to OE-005).
 
 ### Stage 4: Link (modified)
 
@@ -122,13 +122,13 @@ This allows the engineer to see the model's evolution: what was added when, from
 
 - Project name displayed (editable inline, defaults to "Untitled Project")
 - Last modified timestamp
-- "New Project" button (with confirmation if current project has data)
+- "New Project" button (with confirmation if current project has data). The old `project.json` is renamed to `project-backup-{timestamp}.json` before overwriting, so work is never silently lost.
 
 ### Left Panel
 
 - "Generate Model" button text changes to "Add Batch"
 - All other controls remain the same (mode toggle, layer selection, file upload, provider selector, requirement preview)
-- The mode toggle is set once on project creation and locked for the project's lifetime (can't mix Capella and Rhapsody in one project)
+- The mode toggle is set once on project creation and locked for the project's lifetime (can't mix Capella and Rhapsody in one project). The toggle is visually disabled with a tooltip "Mode is locked for this project" after the first batch.
 
 ### Right Panel -- Batch History Tab
 
