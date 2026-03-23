@@ -273,6 +273,30 @@ TOOL_DEFINITIONS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_uncovered_requirements",
+            "description": (
+                "Get the list of requirements that have NO traceability links. "
+                "Returns each uncovered requirement's ID and full text. "
+                "Use this to find gaps in model coverage."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_coverage_summary",
+            "description": (
+                "Get a full coverage report: total requirements, covered count, "
+                "uncovered count, and for each requirement whether it is covered "
+                "and which links reference it. Use this for detailed traceability analysis."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -508,6 +532,62 @@ def _get_element_details(model: MBSEModel, arguments: dict) -> dict:
     return {"success": False, "message": f"Element '{element_id}' not found.", "element": None}
 
 
+def _get_uncovered_requirements(model: MBSEModel, arguments: dict) -> dict:
+    """Return requirements that have no traceability links."""
+    linked_ids = set()
+    for link in model.links:
+        for req in model.requirements:
+            if link.source == req.id or link.target == req.id:
+                linked_ids.add(req.id)
+
+    uncovered = [
+        {"id": req.id, "text": req.text, "source_dig": req.source_dig}
+        for req in model.requirements if req.id not in linked_ids
+    ]
+    return {
+        "success": True,
+        "total_requirements": len(model.requirements),
+        "covered": len(linked_ids),
+        "uncovered_count": len(uncovered),
+        "uncovered": uncovered,
+    }
+
+
+def _get_coverage_summary(model: MBSEModel, arguments: dict) -> dict:
+    """Return detailed per-requirement coverage with associated links."""
+    req_links: dict[str, list[dict]] = {req.id: [] for req in model.requirements}
+    for link in model.links:
+        for req_id in req_links:
+            if link.source == req_id or link.target == req_id:
+                req_links[req_id].append({
+                    "link_id": link.id,
+                    "source": link.source,
+                    "target": link.target,
+                    "type": link.type,
+                })
+
+    details = []
+    for req in model.requirements:
+        links = req_links.get(req.id, [])
+        details.append({
+            "requirement_id": req.id,
+            "text": req.text[:150],
+            "covered": len(links) > 0,
+            "link_count": len(links),
+            "links": links,
+        })
+
+    covered = sum(1 for d in details if d["covered"])
+    return {
+        "success": True,
+        "total": len(details),
+        "covered": covered,
+        "uncovered": len(details) - covered,
+        "percentage": round(covered / len(details) * 100) if details else 100,
+        "details": details,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
@@ -524,6 +604,8 @@ _TOOL_HANDLERS = {
     "list_elements": _list_elements,
     "list_links": _list_links,
     "get_element_details": _get_element_details,
+    "get_uncovered_requirements": _get_uncovered_requirements,
+    "get_coverage_summary": _get_coverage_summary,
 }
 
 
