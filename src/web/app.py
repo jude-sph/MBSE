@@ -456,7 +456,43 @@ async def edit_job(job_id: str, request: Request):
 
 
 # ---------------------------------------------------------------------------
-# POST /job/{job_id}/chat
+# POST /project/chat — Chat with agent using the current project model
+# ---------------------------------------------------------------------------
+
+_project_chat_history: list[dict] = []
+
+@app.post("/project/chat")
+async def chat_project(request: Request):
+    global _project_chat_history
+
+    if not current_project:
+        raise HTTPException(400, "No active project")
+    if not current_project.layers:
+        raise HTTPException(400, "Project has no model data yet. Add a batch first.")
+
+    body = await request.json()
+    message = body.get("message", "").strip()
+    if not message:
+        raise HTTPException(400, "Missing 'message' in request body")
+
+    tracker = CostTracker(model=config.MODEL)
+    response_text, updated_history = chat_with_agent(
+        model=current_project,
+        user_message=message,
+        conversation_history=_project_chat_history,
+        tracker=tracker,
+    )
+    _project_chat_history = updated_history
+    save_project(current_project)
+
+    return {
+        "response": response_text,
+        "model": json.loads(current_project.model_dump_json()),
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /job/{job_id}/chat — Legacy: chat with a specific job model
 # ---------------------------------------------------------------------------
 
 @app.post("/job/{job_id}/chat")
