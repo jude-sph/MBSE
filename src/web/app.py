@@ -22,9 +22,16 @@ from src.agent.chat import chat_with_agent
 from src.agent.tools import apply_tool
 from src.cost_tracker import CostTracker
 from src.exporter import export_json, export_xlsx, export_text
-from src.models import MBSEModel, Requirement
+from src.models import MBSEModel, ProjectModel, Requirement
 from src.parser import parse_requirements_file
-from src.pipeline import estimate_cost, run_pipeline
+from src.pipeline import estimate_cost, merge_batch_into_project, run_pipeline
+from src.project import (
+    backup_project,
+    get_project_path,
+    load_project,
+    new_project as create_new_project,
+    save_project,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +43,7 @@ templates = Jinja2Templates(directory=WEB_DIR / "templates")
 # In-memory state
 jobs: dict[str, "Job"] = {}
 parsed_requirements: list[Requirement] = []
+current_project: ProjectModel | None = load_project()
 
 from src.config import MODEL_CATALOGUE, CAPELLA_LAYERS, RHAPSODY_DIAGRAMS
 
@@ -47,7 +55,7 @@ class Job:
     requirements: list = field(default_factory=list)
     settings: dict = field(default_factory=dict)
     events: list[dict] = field(default_factory=list)
-    model: MBSEModel | None = None
+    model: MBSEModel | ProjectModel | None = None
     cancelled: bool = False
     task: asyncio.Task | None = None
     conversation_history: list[dict] = field(default_factory=list)
@@ -101,6 +109,7 @@ async def index(request: Request):
             "has_anthropic_key": bool(config.ANTHROPIC_API_KEY),
             "has_openrouter_key": bool(config.OPENROUTER_API_KEY),
         },
+        "project": current_project.model_dump() if current_project else None,
     })
 
 
@@ -132,6 +141,63 @@ async def upload(file: UploadFile = File(...)):
         "count": len(reqs),
         "requirements": [r.model_dump() for r in reqs],
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /project
+# ---------------------------------------------------------------------------
+
+@app.get("/project")
+async def get_project():
+    if current_project is None:
+        return {"project": None}
+    return current_project.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# POST /project/new
+# ---------------------------------------------------------------------------
+
+@app.post("/project/new")
+async def create_project(request: Request):
+    global current_project
+    body = await request.json()
+    name = body.get("name", "Untitled Project")
+    mode = body.get("mode", config.DEFAULT_MODE)
+
+    # Backup existing project if it has data
+    if current_project and (current_project.batches or current_project.requirements):
+        backup_project()
+
+    current_project = create_new_project(mode, name)
+    save_project(current_project)
+    return current_project.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# POST /project/rename
+# ---------------------------------------------------------------------------
+
+@app.post("/project/rename")
+async def rename_project(request: Request):
+    global current_project
+    if not current_project:
+        raise HTTPException(400, "No active project")
+    body = await request.json()
+    current_project.project.name = body.get("name", current_project.project.name)
+    save_project(current_project)
+    return {"name": current_project.project.name}
+
+
+# ---------------------------------------------------------------------------
+# GET /project/batches
+# ---------------------------------------------------------------------------
+
+@app.get("/project/batches")
+async def get_batches():
+    if not current_project:
+        return {"batches": []}
+    return {"batches": [b.model_dump() for b in current_project.batches]}
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +237,7 @@ async def run(request: Request):
     model = body.get("model", config.MODEL)
     provider = body.get("provider", config.PROVIDER)
     clarifications = body.get("clarifications") or None
+    source_file = body.get("source_file", "uploaded")
 
     # Feature 2: filter requirements by selected IDs if provided
     selected_req_ids = body.get("selected_requirements")
@@ -192,6 +259,7 @@ async def run(request: Request):
             "model": model,
             "provider": provider,
             "clarifications": clarifications,
+            "source_file": source_file,
         },
     )
     jobs[job.id] = job
@@ -205,20 +273,34 @@ async def run(request: Request):
 
 async def _run_job_async(job: Job):
     """Run the MBSE pipeline in a thread and stream events via job.emit."""
+    global current_project
+
     try:
         job.status = "running"
         settings = job.settings
+        mode = settings["mode"]
+        model_name = settings["model"]
+        selected_layers = settings["selected_layers"]
+        provider = settings["provider"]
 
         cost_log_path = config.OUTPUT_DIR / "cost_log.jsonl"
+
+        # Create project if needed
+        if current_project is None:
+            current_project = create_new_project(mode, "Untitled Project")
+
+        # Run pipeline with existing model context if project has data
+        existing = current_project if current_project.batches else None
 
         def _do_work():
             return run_pipeline(
                 requirements=job.requirements,
-                mode=settings["mode"],
-                selected_layers=settings["selected_layers"],
-                model=settings["model"],
-                provider=settings["provider"],
+                mode=mode,
+                selected_layers=selected_layers,
+                model=model_name,
+                provider=provider,
                 clarifications=settings.get("clarifications"),
+                existing_model=existing,
                 emit=job.emit,
                 cost_log_path=cost_log_path,
             )
@@ -228,14 +310,30 @@ async def _run_job_async(job: Job):
             job.emit({"stage": "cancelled", "status": "cancelled", "detail": "Job was cancelled before starting"})
             return
 
-        mbse_model = await asyncio.to_thread(_do_work)
+        batch_result = await asyncio.to_thread(_do_work)
 
         if job.cancelled:
             job.status = "cancelled"
             job.emit({"stage": "cancelled", "status": "cancelled", "detail": "Job was cancelled"})
             return
 
-        job.model = mbse_model
+        # Merge batch result into the project
+        total_cost = batch_result.meta.cost.total_cost_usd if batch_result.meta.cost else 0
+        merge_batch_into_project(
+            current_project,
+            batch_result.requirements,
+            batch_result.layers,
+            batch_result.links,
+            batch_result.instructions,
+            source_file=settings.get("source_file", "uploaded"),
+            layers_generated=selected_layers,
+            model_name=model_name,
+            cost=total_cost,
+        )
+        save_project(current_project)
+
+        # Job model is the full project
+        job.model = current_project
         job.status = "complete"
 
     except Exception as exc:
@@ -302,6 +400,8 @@ async def edit_job(job_id: str, request: Request):
         raise HTTPException(400, "Missing 'tool_name' in request body")
 
     result = apply_tool(job.model, tool_name, arguments)
+    if current_project:
+        save_project(current_project)
     return result
 
 
@@ -330,6 +430,8 @@ async def chat_job(job_id: str, request: Request):
         tracker=tracker,
     )
     job.conversation_history = updated_history
+    if current_project:
+        save_project(current_project)
 
     return {
         "response": response_text,
@@ -357,7 +459,10 @@ async def export_job(job_id: str, fmt: str):
     export_dir.mkdir(parents=True, exist_ok=True)
 
     # Feature 4: smarter export filenames
-    source_stem = Path(job.model.meta.source_file).stem if job.model.meta.source_file else "mbse"
+    if current_project and current_project.project.name:
+        source_stem = current_project.project.name.lower().replace(" ", "-")
+    else:
+        source_stem = Path(job.model.meta.source_file).stem if job.model.meta.source_file else "mbse"
     timestamp = datetime.now().strftime("%Y%m%d-%H%M")
     mode = job.model.meta.mode or "model"
     ext = "txt" if fmt == "text" else fmt
