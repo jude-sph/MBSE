@@ -13,8 +13,10 @@ from src.models import MBSEModel
 _LAYER_DISPLAY_NAMES: dict[str, str] = {
     "operational_analysis": "Operational Analysis",
     "system_analysis": "System Analysis",
+    "system_needs_analysis": "System Needs Analysis",
     "logical_architecture": "Logical Architecture",
     "physical_architecture": "Physical Architecture",
+    "epbs": "End-Product Breakdown Structure",
 }
 
 

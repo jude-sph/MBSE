@@ -163,9 +163,10 @@ MODEL_CATALOGUE = [
 # Capella architecture layers
 CAPELLA_LAYERS = {
     "operational_analysis": "Operational Analysis (OA)",
-    "system_analysis": "System Analysis (SA)",
+    "system_needs_analysis": "System Needs Analysis (SA)",
     "logical_architecture": "Logical Architecture (LA)",
     "physical_architecture": "Physical Architecture (PA)",
+    "epbs": "End-Product Breakdown Structure (EPBS)",
 }
 
 # Rhapsody diagram types

@@ -7,7 +7,7 @@ def test_estimate_cost_capella():
     estimate = estimate_cost(
         requirements=reqs,
         mode="capella",
-        selected_layers=["operational_analysis", "system_analysis"],
+        selected_layers=["operational_analysis", "system_needs_analysis"],
         model="anthropic/claude-sonnet-4",
     )
     assert "total_calls" in estimate

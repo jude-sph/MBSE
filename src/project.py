@@ -42,7 +42,11 @@ def load_project(path: Path | None = None) -> ProjectModel | None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return ProjectModel.model_validate(data)
+        project = ProjectModel.model_validate(data)
+        # Migrate old layer keys
+        if "system_analysis" in project.layers and "system_needs_analysis" not in project.layers:
+            project.layers["system_needs_analysis"] = project.layers.pop("system_analysis")
+        return project
     except Exception:
         return None
 
