@@ -1154,18 +1154,17 @@ body {
 }
 
 .instruction-copy {
-    background: none;
-    border: none;
-    color: #333;
-    font-size: 14px;
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    color: #888;
+    font-size: 12px;
     cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 3px;
+    padding: 3px 8px;
+    border-radius: 4px;
     transition: all 0.15s;
-    opacity: 0;
+    flex-shrink: 0;
 }
-.instruction-card:hover .instruction-copy { opacity: 1; }
-.instruction-copy:hover { color: #7c7cff; background: #1a1a2e; }
+.instruction-copy:hover { color: #7c7cff; border-color: #7c7cff; background: #1a1a3e; }
 
 .instruction-detail {
     color: #999;
