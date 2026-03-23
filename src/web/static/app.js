@@ -1501,6 +1501,10 @@ function initChatResize() {
     var startY, startHeight;
 
     handle.addEventListener('mousedown', function(e) {
+        // Auto-expand if collapsed
+        if (panel.classList.contains('collapsed')) {
+            toggleChat();
+        }
         startY = e.clientY;
         startHeight = panel.offsetHeight;
         document.addEventListener('mousemove', onMouseMove);
