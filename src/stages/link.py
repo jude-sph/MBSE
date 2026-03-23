@@ -14,7 +14,7 @@ def generate_links(mode: str, layers: dict, requirements: list[Requirement], tra
 
     # Select valid link types based on mode
     if mode == "capella":
-        link_types = "satisfies, realizes, implements, involves, exchanges"
+        link_types = "satisfies, realizes, implements, allocates, communicates, traces, involves, exchanges"
     else:
         link_types = "deriveReqt, satisfy, refine, trace, allocate"
 
