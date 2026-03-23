@@ -92,7 +92,14 @@ def _extract_json(text: str) -> str:
         text = text.split("```json")[1].split("```")[0]
     elif "```" in text:
         text = text.split("```")[1].split("```")[0]
-    return text.strip()
+    text = text.strip()
+    # Fix common LLM JSON issues: control characters, trailing commas
+    import re
+    # Remove control characters except \n \r \t
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+    # Remove trailing commas before } or ]
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+    return text
 
 
 def call_llm(
