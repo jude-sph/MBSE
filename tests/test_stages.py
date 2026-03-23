@@ -3,6 +3,8 @@ from unittest.mock import patch, MagicMock
 from src.stages.analyze import analyze_requirements
 from src.stages.clarify import apply_clarifications
 from src.stages.generate import generate_layer
+from src.stages.link import generate_links
+from src.stages.instruct import generate_instructions
 from src.cost_tracker import CostTracker
 
 
@@ -81,3 +83,49 @@ def test_generate_invalid_mode_raises(sample_requirements):
     import pytest
     with pytest.raises(ValueError, match="No prompt template"):
         generate_layer("invalid", "operational_analysis", sample_requirements, tracker)
+
+
+def test_link_stage_returns_links(sample_requirements):
+    elements = {
+        "operational_analysis": {
+            "activities": [{"id": "OA-003", "name": "Maintain Station"}]
+        }
+    }
+    mock_response = {
+        "links": [
+            {"id": "LNK-001", "source": "OA-003", "target": "REQ-SAR-004", "type": "satisfies", "description": "Station keeping satisfies positioning requirement"}
+        ]
+    }
+    tracker = CostTracker(model="test-model")
+    with patch("src.stages.link.call_llm", return_value=mock_response):
+        result = generate_links("capella", elements, sample_requirements, tracker)
+    assert len(result["links"]) == 1
+    assert result["links"][0]["type"] == "satisfies"
+
+
+def test_instruct_stage_returns_steps():
+    model_data = {"layers": {"operational_analysis": {"entities": [{"id": "OE-001", "name": "Test"}]}}}
+    mock_response = {
+        "tool": "Capella 7.0",
+        "steps": [
+            {"step": 1, "action": "Create project", "detail": "File > New > Capella Project", "layer": "general"}
+        ]
+    }
+    tracker = CostTracker(model="test-model")
+    with patch("src.stages.instruct.call_llm", return_value=mock_response):
+        result = generate_instructions("capella", model_data, tracker)
+    assert result["steps"][0]["action"] == "Create project"
+
+
+def test_instruct_rhapsody_returns_steps():
+    model_data = {"layers": {"block_definition": {"blocks": [{"id": "BDD-001", "name": "Test"}]}}}
+    mock_response = {
+        "tool": "IBM Rhapsody 10.0",
+        "steps": [
+            {"step": 1, "action": "Create project", "detail": "File > New > Project", "layer": "general"}
+        ]
+    }
+    tracker = CostTracker(model="test-model")
+    with patch("src.stages.instruct.call_llm", return_value=mock_response):
+        result = generate_instructions("rhapsody", model_data, tracker)
+    assert result["tool"] == "IBM Rhapsody 10.0"
