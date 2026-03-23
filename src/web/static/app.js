@@ -1463,20 +1463,7 @@ async function addElement(layerKey, collKey, newElem) {
 // =============================================================================
 
 function toggleChat() {
-    var panel = document.getElementById('chat-panel');
-    var body = document.getElementById('chat-body');
-    var arrow = document.getElementById('chat-toggle-arrow');
-
-    var isCollapsed = panel.classList.contains('collapsed');
-    if (isCollapsed) {
-        panel.classList.remove('collapsed');
-        body.style.display = '';
-        if (arrow) arrow.textContent = '\u2335';
-    } else {
-        panel.classList.add('collapsed');
-        body.style.display = 'none';
-        if (arrow) arrow.textContent = '\u2963';
-    }
+    // No-op: chat panel is always visible now
 }
 
 async function sendChat() {
@@ -1590,10 +1577,6 @@ function initChatResize() {
     var startY, startHeight;
 
     handle.addEventListener('mousedown', function(e) {
-        // Auto-expand if collapsed
-        if (panel.classList.contains('collapsed')) {
-            toggleChat();
-        }
         startY = e.clientY;
         startHeight = panel.offsetHeight;
         document.addEventListener('mousemove', onMouseMove);
