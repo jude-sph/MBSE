@@ -22,3 +22,7 @@ output/
 # Reference documents (large binaries)
 *.pdf
 *.pptx
+*.docx
+
+# Local reference material
+new-info/
