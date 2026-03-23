@@ -129,3 +129,28 @@ def test_instruct_rhapsody_returns_steps():
     with patch("src.stages.instruct.call_llm", return_value=mock_response):
         result = generate_instructions("rhapsody", model_data, tracker)
     assert result["tool"] == "IBM Rhapsody 10.0"
+
+
+def test_generate_with_existing_elements(sample_requirements):
+    existing = {
+        "entities": [{"id": "OE-001", "name": "PIB Icebreaker", "type": "OperationalEntity"}],
+        "capabilities": [], "scenarios": [], "activities": [],
+    }
+    mock_response = {
+        "entities": [{"id": "OE-005", "name": "Coast Guard HQ", "type": "OperationalEntity", "actors": []}],
+        "capabilities": [], "scenarios": [], "activities": [],
+    }
+    tracker = CostTracker(model="test-model")
+    with patch("src.stages.generate.call_llm", return_value=mock_response):
+        result = generate_layer("capella", "operational_analysis", sample_requirements, tracker,
+                                existing_elements=existing)
+    assert result["entities"][0]["id"] == "OE-005"
+
+
+def test_generate_without_existing_elements_still_works(sample_requirements):
+    mock_response = {"entities": [{"id": "OE-001", "name": "Test", "type": "OperationalEntity", "actors": []}],
+                     "capabilities": [], "scenarios": [], "activities": []}
+    tracker = CostTracker(model="test-model")
+    with patch("src.stages.generate.call_llm", return_value=mock_response):
+        result = generate_layer("capella", "operational_analysis", sample_requirements, tracker)
+    assert "entities" in result

@@ -17,7 +17,7 @@ INPUT
 The following requirements are provided as a JSON array:
 
 {requirements}
-
+{existing_elements}
 ---
 
 EXAMPLE OUTPUT SCHEMA
