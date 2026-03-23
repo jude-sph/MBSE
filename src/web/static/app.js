@@ -300,27 +300,55 @@ function showProgressArea(settings) {
     document.getElementById('progress-area').style.display = '';
     document.getElementById('running-cost').textContent = '';
 
+    // Add spinner to title
+    var titleEl = document.querySelector('.progress-title');
+    if (titleEl) {
+        clearChildren(titleEl);
+        var spinner = el('span', { className: 'spinner' });
+        titleEl.appendChild(spinner);
+        titleEl.appendChild(document.createTextNode('Generating Model'));
+    }
+
     var stagesDiv = document.getElementById('pipeline-stages');
     clearChildren(stagesDiv);
 
     var stages = [
-        { key: 'analyze', label: 'Analyze' },
-        { key: 'clarify', label: 'Clarify' },
-        { key: 'generate', label: 'Generate' },
-        { key: 'link', label: 'Link' },
-        { key: 'instruct', label: 'Instruct' },
+        { key: 'analyze', label: 'Analyzing Requirements', desc: 'Checking for ambiguity and completeness' },
+        { key: 'clarify', label: 'Clarification', desc: 'Resolving any flagged issues' },
+        { key: 'generate', label: 'Generating Model Layers', desc: 'Building MBSE elements for each layer' },
+        { key: 'link', label: 'Creating Traceability Links', desc: 'Connecting elements across layers' },
+        { key: 'instruct', label: 'Writing Recreation Steps', desc: 'Step-by-step instructions for your tool' },
     ];
 
     stages.forEach(function (s) {
-        var row = el('div', { className: 'stage-row', id: 'stage-' + s.key });
+        var row = el('div', { className: 'stage-row stage-pending', id: 'stage-' + s.key });
+
+        // Circle icon
+        var icon = el('div', { className: 'stage-icon', id: 'icon-' + s.key });
+        row.appendChild(icon);
+
+        // Content area
+        var content = el('div', { className: 'stage-content' });
+
+        // Header row: label + badge
+        var header = el('div', { className: 'stage-header' });
         var label = el('span', { className: 'stage-label', textContent: s.label });
+        var badge = el('span', { className: 'stage-badge', id: 'badge-' + s.key, textContent: 'Waiting' });
+        header.appendChild(label);
+        header.appendChild(badge);
+        content.appendChild(header);
+
+        // Detail text
+        var detail = el('div', { className: 'stage-detail', id: 'detail-' + s.key, textContent: s.desc });
+        content.appendChild(detail);
+
+        // Progress bar
         var barWrap = el('div', { className: 'stage-bar-wrap' });
         var bar = el('div', { className: 'stage-bar', id: 'bar-' + s.key });
         barWrap.appendChild(bar);
-        var detail = el('span', { className: 'stage-detail', id: 'detail-' + s.key });
-        row.appendChild(label);
-        row.appendChild(barWrap);
-        row.appendChild(detail);
+        content.appendChild(barWrap);
+
+        row.appendChild(content);
         stagesDiv.appendChild(row);
     });
 }
@@ -359,6 +387,14 @@ function handlePipelineEvent(event) {
 
     if (stage === 'done') {
         if (sseSource) { sseSource.close(); sseSource = null; }
+        // Update title to show completion
+        var titleEl = document.querySelector('.progress-title');
+        if (titleEl) {
+            clearChildren(titleEl);
+            var check = el('span', { textContent: '\u2713', style: 'color: #4ade80; font-size: 18px;' });
+            titleEl.appendChild(check);
+            titleEl.appendChild(document.createTextNode(' Model Complete'));
+        }
         document.getElementById('running-cost').textContent = detail;
         fetchAndDisplayModel(currentJobId);
         return;
@@ -389,16 +425,23 @@ function handlePipelineEvent(event) {
     var stageRow = document.getElementById('stage-' + stage);
     var bar = document.getElementById('bar-' + stage);
     var detailEl = document.getElementById('detail-' + stage);
+    var badge = document.getElementById('badge-' + stage);
+    var icon = document.getElementById('icon-' + stage);
 
     if (!stageRow) return;
 
     if (status === 'running') {
         stageRow.className = 'stage-row stage-running';
-        if (bar) bar.style.width = '60%';
+        if (badge) badge.textContent = 'Running';
+        if (icon) icon.textContent = '';
         if (detailEl) detailEl.textContent = detail;
-    } else if (status === 'complete' || status === 'layer_complete') {
+    } else if (status === 'complete') {
         stageRow.className = 'stage-row stage-complete';
-        if (bar) bar.style.width = '100%';
+        if (badge) badge.textContent = 'Done';
+        if (icon) icon.textContent = '\u2713';
+        if (detailEl) detailEl.textContent = detail;
+    } else if (status === 'layer_complete') {
+        // Partial progress within generate stage -- keep it running
         if (detailEl) detailEl.textContent = detail;
     }
 }
@@ -533,6 +576,8 @@ function renderCollection(layerKey, collKey, elements) {
     var section = el('div', { className: 'collection-section', id: 'coll-' + layerKey + '-' + collKey });
 
     var header = el('div', { className: 'collection-header' });
+    var arrow = el('span', { className: 'collection-arrow', textContent: '\u25be' });
+    header.appendChild(arrow);
     header.appendChild(el('span', { className: 'collection-name', textContent: collLabel }));
     header.appendChild(el('span', { className: 'collection-count', textContent: '(' + elements.length + ')' }));
 
@@ -545,6 +590,14 @@ function renderCollection(layerKey, collKey, elements) {
     var addBtn = el('button', { className: 'btn-add-element', textContent: '+ Add' });
     addBtn.addEventListener('click', function () {
         showAddElementForm(layerKey, collKey, listDiv, addBtn);
+    });
+
+    // Collapsible collection
+    header.addEventListener('click', function () {
+        var isOpen = listDiv.style.display !== 'none';
+        listDiv.style.display = isOpen ? 'none' : '';
+        addBtn.style.display = isOpen ? 'none' : '';
+        arrow.textContent = isOpen ? '\u25b8' : '\u25be';
     });
 
     section.appendChild(header);
@@ -584,7 +637,67 @@ function renderElementRow(layerKey, collKey, elem) {
     actions.appendChild(deleteBtn);
     row.appendChild(actions);
 
+    // Click row to expand/collapse details
+    row.addEventListener('click', function (e) {
+        if (e.target.closest('.element-actions') || e.target.closest('button')) return;
+        toggleElementDetails(row, elem);
+    });
+
     return row;
+}
+
+function toggleElementDetails(row, elem) {
+    // Check if details panel already exists right after this row
+    var existing = row.nextElementSibling;
+    if (existing && existing.classList.contains('element-details')) {
+        existing.remove();
+        return;
+    }
+
+    var details = el('div', { className: 'element-details' });
+    var skipKeys = { id: 1, name: 1, type: 1 };
+
+    Object.keys(elem).forEach(function (key) {
+        if (skipKeys[key]) return;
+        var val = elem[key];
+        if (val === null || val === undefined || val === '') return;
+
+        var field = el('div', { className: 'detail-field' });
+        var keyEl = el('span', { className: 'detail-key', textContent: key.replace(/_/g, ' ') });
+        var valEl = el('span', { className: 'detail-value' });
+
+        if (Array.isArray(val)) {
+            if (val.length === 0) return;
+            if (typeof val[0] === 'object') {
+                // Array of objects (e.g., scenario steps)
+                val.forEach(function (item, i) {
+                    var line = Object.entries(item).map(function (kv) {
+                        return kv[0] + ': ' + kv[1];
+                    }).join(', ');
+                    var stepEl = el('div', { textContent: (i + 1) + '. ' + line, style: 'padding: 1px 0; color: #999;' });
+                    valEl.appendChild(stepEl);
+                });
+            } else {
+                valEl.textContent = val.join(', ');
+            }
+        } else if (typeof val === 'object') {
+            valEl.textContent = JSON.stringify(val);
+        } else {
+            valEl.textContent = String(val);
+        }
+
+        field.appendChild(keyEl);
+        field.appendChild(valEl);
+        details.appendChild(field);
+    });
+
+    if (details.children.length === 0) {
+        var empty = el('div', { className: 'detail-field' });
+        empty.appendChild(el('span', { className: 'detail-value', textContent: 'No additional properties' }));
+        details.appendChild(empty);
+    }
+
+    row.parentNode.insertBefore(details, row.nextSibling);
 }
 
 async function regenLayer(layerKey) {
