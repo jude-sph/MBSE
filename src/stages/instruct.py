@@ -11,4 +11,4 @@ def generate_instructions(mode: str, model_data: dict, tracker: CostTracker, cli
     template = (PROMPTS_DIR / prompt_file).read_text()
     model_json = json.dumps(model_data, indent=2)
     prompt = template.format(model=model_json)
-    return call_llm(prompt=prompt, cost_tracker=tracker, call_type="instruct", stage="instruct", client=client)
+    return call_llm(prompt=prompt, cost_tracker=tracker, call_type="instruct", stage="instruct", max_tokens=8192, client=client)
