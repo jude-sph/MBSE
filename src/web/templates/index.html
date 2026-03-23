@@ -13,9 +13,11 @@
         <div class="header-left">
             <span class="app-title">MBSE Generator</span>
             <span class="version">v{{ version }}</span>
+            <span id="project-name" class="project-name" contenteditable="true" title="Click to rename project">Untitled Project</span>
+            <span id="project-modified" class="project-modified"></span>
+            <button id="btn-new-project" class="btn-new-project" title="Start a new project">New Project</button>
         </div>
         <div class="header-right">
-            <button class="btn-icon" id="clear-session-btn" onclick="clearSession()" title="Clear saved session" style="display:none">Clear Session</button>
             <button class="btn-icon" id="settings-btn" onclick="openSettings()" title="Settings">&#9881; Settings</button>
             <button class="btn-update" id="update-btn" onclick="checkAndUpdate()">Update</button>
         </div>
@@ -101,7 +103,7 @@
             <!-- Generate Button -->
             <div class="panel-section">
                 <button id="generate-btn" class="btn-generate" onclick="startGenerate()" disabled>
-                    &#9654; Generate Model
+                    &#9654; Add Batch
                 </button>
             </div>
 
@@ -120,6 +122,7 @@
                     <button class="tab-btn" data-tab="links" onclick="switchTab('links')">Links</button>
                     <button class="tab-btn" data-tab="instructions" onclick="switchTab('instructions')">Instructions</button>
                     <button class="tab-btn" data-tab="json" onclick="switchTab('json')">Raw JSON</button>
+                    <button class="tab-btn" data-tab="batches" onclick="switchTab('batches')">Batches</button>
                 </div>
                 <div class="tab-actions">
                     <div class="export-dropdown">
@@ -165,6 +168,10 @@
 
                 <div id="tab-json" class="tab-pane" style="display:none">
                     <pre id="json-output" class="json-output"></pre>
+                </div>
+
+                <div id="tab-batches" class="tab-pane" style="display:none">
+                    <div id="batch-list" class="batch-list"></div>
                 </div>
 
             </div>
@@ -325,6 +332,7 @@
         const CAPELLA_LAYERS = {{ capella_layers | tojson }};
         const RHAPSODY_DIAGRAMS = {{ rhapsody_diagrams | tojson }};
         const CURRENT_SETTINGS = {{ settings | tojson }};
+        const INITIAL_PROJECT = {{ project | tojson }};
     </script>
     <script src="/static/app.js"></script>
 
