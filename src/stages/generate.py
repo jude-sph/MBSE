@@ -19,12 +19,37 @@ PROMPT_MAP = {
 }
 
 
-def generate_layer(mode: str, layer_key: str, requirements: list[Requirement], tracker: CostTracker, client=None) -> dict:
+def generate_layer(mode: str, layer_key: str, requirements: list[Requirement], tracker: CostTracker, client=None, existing_elements=None) -> dict:
     """Stage 3: Generate model elements for a single layer/diagram type."""
     prompt_file = PROMPT_MAP.get((mode, layer_key))
     if not prompt_file:
         raise ValueError(f"No prompt template for mode={mode}, layer={layer_key}")
     template = (PROMPTS_DIR / prompt_file).read_text()
     reqs_json = json.dumps([r.model_dump() for r in requirements], indent=2)
-    prompt = template.format(requirements=reqs_json)
-    return call_llm(prompt=prompt, cost_tracker=tracker, call_type="generate", stage=f"generate_{layer_key}", client=client)
+
+    existing_ctx = ""
+    if existing_elements:
+        existing_ctx = _format_existing_elements(existing_elements)
+
+    prompt = template.format(requirements=reqs_json, existing_elements=existing_ctx)
+    return call_llm(prompt=prompt, cost_tracker=tracker, call_type="generate",
+                    stage=f"generate_{layer_key}", client=client)
+
+
+def _format_existing_elements(layer_data: dict) -> str:
+    """Format existing layer elements as a compact summary for the prompt."""
+    if not layer_data:
+        return ""
+    lines = ["\nExisting elements in this layer (DO NOT recreate these, reference by ID when relevant):"]
+    for collection_key, elements in layer_data.items():
+        if not isinstance(elements, list) or not elements:
+            continue
+        for elem in elements:
+            if isinstance(elem, dict):
+                eid = elem.get("id", "?")
+                name = elem.get("name", "?")
+                etype = elem.get("type", collection_key)
+                lines.append(f"- {eid}: {name} ({etype})")
+    if len(lines) <= 1:
+        return ""
+    return "\n".join(lines)
