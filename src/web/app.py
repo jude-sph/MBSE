@@ -109,7 +109,7 @@ async def index(request: Request):
             "has_anthropic_key": bool(config.ANTHROPIC_API_KEY),
             "has_openrouter_key": bool(config.OPENROUTER_API_KEY),
         },
-        "project": current_project.model_dump() if current_project else None,
+        "project": json.loads(current_project.model_dump_json()) if current_project else None,
     })
 
 
