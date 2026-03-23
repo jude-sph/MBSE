@@ -76,23 +76,60 @@ document.addEventListener('DOMContentLoaded', function () {
     // Check for updates quietly on page load
     checkUpdatesQuietly();
 
-    // Feature 1: Session Persistence — restore saved model on load
-    var saved = localStorage.getItem('mbse_currentModel');
-    if (saved) {
-        try {
-            currentModel = JSON.parse(saved);
-            currentJobId = localStorage.getItem('mbse_currentJobId') || 'restored';
-            renderTree();
-            renderCoverageIndicator();
-            switchTab('tree');
-            showToast('Previous session restored.', 'info');
-            var clearBtn = document.getElementById('clear-session-btn');
-            if (clearBtn) clearBtn.style.display = '';
-        } catch(e) {
-            localStorage.removeItem('mbse_currentModel');
-            localStorage.removeItem('mbse_currentJobId');
+    // Project-based restore
+    if (INITIAL_PROJECT && INITIAL_PROJECT.project) {
+        currentModel = INITIAL_PROJECT;
+        currentJobId = 'project';
+        renderTree();
+        renderCoverageIndicator();
+        switchTab('tree');
+        updateProjectUI();
+    } else {
+        // No project yet — show empty state
+        var treeContainer = document.getElementById('tab-tree');
+        if (treeContainer) {
+            clearChildren(treeContainer);
+            treeContainer.appendChild(el('div', {
+                className: 'empty-state',
+                textContent: 'No project yet. Upload requirements and add your first batch to start building a model.',
+            }));
         }
     }
+
+    // Project name editing
+    document.getElementById('project-name').addEventListener('blur', async function() {
+        var newName = this.textContent.trim();
+        if (newName && currentModel) {
+            await fetch('/project/rename', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: newName}),
+            });
+        }
+    });
+
+    // New Project button
+    document.getElementById('btn-new-project').addEventListener('click', async function() {
+        if (currentModel && currentModel.batches && currentModel.batches.length > 0) {
+            if (!confirm('This will archive the current project and start fresh. Continue?')) return;
+        }
+        var name = prompt('Project name:', 'Untitled Project');
+        if (name === null) return;
+
+        var res = await fetch('/project/new', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name, mode: selectedMode}),
+        });
+        var data = await res.json();
+        currentModel = data;
+        currentJobId = 'project';
+        renderTree();
+        renderCoverageIndicator();
+        updateProjectUI();
+        unlockModeToggle();
+        showToast('New project created.', 'success');
+    });
 });
 
 // =============================================================================
@@ -118,6 +155,41 @@ function setMode(mode) {
     if (label) label.textContent = mode === 'capella' ? 'Layers' : 'Diagrams';
 
     readSelectedLayers();
+}
+
+function updateProjectUI() {
+    var nameEl = document.getElementById('project-name');
+    var modifiedEl = document.getElementById('project-modified');
+
+    if (currentModel && currentModel.project) {
+        nameEl.textContent = currentModel.project.name || 'Untitled Project';
+        if (currentModel.project.last_modified) {
+            var d = new Date(currentModel.project.last_modified);
+            modifiedEl.textContent = 'Last saved ' + d.toLocaleString();
+        }
+        // Lock mode toggle if batches exist
+        if (currentModel.batches && currentModel.batches.length > 0) {
+            lockModeToggle();
+        }
+    }
+}
+
+function lockModeToggle() {
+    var toggleBtns = document.querySelectorAll('#mode-toggle .segment-btn');
+    toggleBtns.forEach(function(btn) {
+        btn.classList.add('locked');
+        btn.title = 'Mode is locked for this project';
+        btn.style.pointerEvents = 'none';
+    });
+}
+
+function unlockModeToggle() {
+    var toggleBtns = document.querySelectorAll('#mode-toggle .segment-btn');
+    toggleBtns.forEach(function(btn) {
+        btn.classList.remove('locked');
+        btn.title = '';
+        btn.style.pointerEvents = '';
+    });
 }
 
 function readSelectedLayers() {
@@ -350,11 +422,14 @@ async function proceedGenerate(clarifications) {
         settings.clarifications = clarifications;
     }
 
-    // Feature 1: clear stale session before new run
-    localStorage.removeItem('mbse_currentModel');
-    localStorage.removeItem('mbse_currentJobId');
-    var clearBtn = document.getElementById('clear-session-btn');
-    if (clearBtn) clearBtn.style.display = 'none';
+    // Create project first if none exists
+    if (!currentModel || !currentModel.project) {
+        await fetch('/project/new', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: 'Untitled Project', mode: selectedMode}),
+        });
+    }
 
     // Feature 2: attach selected requirement IDs
     var checkedBoxes = document.querySelectorAll('#req-preview-list .req-checkbox:checked');
@@ -555,25 +630,31 @@ function handlePipelineEvent(event) {
 
 async function fetchAndDisplayModel(jobId) {
     try {
-        var res = await fetch('/job/' + jobId);
-        if (!res.ok) {
-            var err = await res.json();
-            showToast('Failed to load model: ' + (err.detail || 'unknown error'), 'error');
-            hideProgressArea();
-            return;
+        // Fetch full project instead of just job result
+        var res = await fetch('/project');
+        if (res.ok) {
+            var data = await res.json();
+            if (data.project) {
+                currentModel = data;
+                currentJobId = jobId;
+            }
+        } else {
+            // Fallback to job endpoint
+            var jobRes = await fetch('/job/' + jobId);
+            if (!jobRes.ok) {
+                var err = await jobRes.json();
+                showToast('Failed to load model: ' + (err.detail || 'unknown error'), 'error');
+                hideProgressArea();
+                return;
+            }
+            currentModel = await jobRes.json();
+            currentJobId = jobId;
         }
-        currentModel = await res.json();
-        // Feature 1: persist to localStorage
-        try {
-            localStorage.setItem('mbse_currentModel', JSON.stringify(currentModel));
-            localStorage.setItem('mbse_currentJobId', currentJobId);
-            var clearBtn = document.getElementById('clear-session-btn');
-            if (clearBtn) clearBtn.style.display = '';
-        } catch(e) { /* storage quota exceeded — ignore */ }
         hideProgressArea();
         renderTree();
         renderCoverageIndicator();
         switchTab('tree');
+        updateProjectUI();
         showToast('Model generated successfully!', 'success');
     } catch (e) {
         showToast('Failed to load model: ' + e.message, 'error');
@@ -910,6 +991,7 @@ function switchTab(tabName) {
     if (tabName === 'links') renderLinksTab();
     if (tabName === 'instructions') renderInstructionsTab();
     if (tabName === 'json') renderJsonTab();
+    if (tabName === 'batches') renderBatchesTab();
 }
 
 function renderLinksTab() {
@@ -978,6 +1060,42 @@ function renderJsonTab() {
     var pre = document.getElementById('json-output');
     if (!pre) return;
     pre.textContent = currentModel ? JSON.stringify(currentModel, null, 2) : 'No model loaded.';
+}
+
+function renderBatchesTab() {
+    var container = document.getElementById('batch-list');
+    if (!container) return;
+    clearChildren(container);
+
+    if (!currentModel || !currentModel.batches || currentModel.batches.length === 0) {
+        container.appendChild(el('div', {className: 'empty-state', textContent: 'No batches yet. Upload requirements and add your first batch.'}));
+        return;
+    }
+
+    // Render newest first
+    var batches = currentModel.batches.slice().reverse();
+    batches.forEach(function(batch) {
+        var card = el('div', {className: 'batch-card'});
+
+        var header = el('div', {className: 'batch-card-header'});
+        header.appendChild(el('span', {className: 'batch-id', textContent: batch.id}));
+        var ts = new Date(batch.timestamp);
+        header.appendChild(el('span', {className: 'batch-time', textContent: ts.toLocaleString()}));
+        card.appendChild(header);
+
+        var meta = el('div', {className: 'batch-card-meta'});
+        meta.appendChild(el('span', {className: 'batch-source', textContent: batch.source_file}));
+        meta.appendChild(el('span', {className: 'batch-reqs', textContent: batch.requirement_ids.length + ' requirements'}));
+        card.appendChild(meta);
+
+        var stats = el('div', {className: 'batch-card-stats'});
+        stats.appendChild(el('span', {className: 'batch-layers', textContent: batch.layers_generated.join(', ')}));
+        stats.appendChild(el('span', {className: 'batch-model', textContent: batch.model}));
+        stats.appendChild(el('span', {className: 'batch-cost', textContent: '$' + batch.cost.toFixed(4)}));
+        card.appendChild(stats);
+
+        container.appendChild(card);
+    });
 }
 
 // =============================================================================
@@ -1256,11 +1374,6 @@ async function sendChat() {
 
             if (data.model) {
                 currentModel = data.model;
-                // Feature 1: persist updated model after chat
-                try {
-                    localStorage.setItem('mbse_currentModel', JSON.stringify(currentModel));
-                    localStorage.setItem('mbse_currentJobId', currentJobId);
-                } catch(e) { /* ignore */ }
                 renderTree();
                 renderCoverageIndicator();
                 var activeTab = document.querySelector('.tab-btn.active');
@@ -1296,24 +1409,9 @@ function appendChatMessage(role, text, isLoading) {
 // 11. EXPORT
 // =============================================================================
 
+// clearSession is superseded by New Project; kept as no-op for compatibility
 function clearSession() {
-    localStorage.removeItem('mbse_currentModel');
-    localStorage.removeItem('mbse_currentJobId');
-    currentModel = null;
-    currentJobId = null;
-    var container = document.getElementById('tab-tree');
-    if (container) {
-        clearChildren(container);
-        container.appendChild(el('div', {
-            className: 'empty-state',
-            textContent: 'No model loaded. Generate a model first.',
-        }));
-    }
-    var indicator = document.getElementById('coverage-indicator');
-    if (indicator) indicator.style.display = 'none';
-    var clearBtn = document.getElementById('clear-session-btn');
-    if (clearBtn) clearBtn.style.display = 'none';
-    showToast('Session cleared.', 'info');
+    showToast('Use "New Project" to start fresh.', 'info');
 }
 
 function toggleExportMenu() {
