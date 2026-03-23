@@ -7,9 +7,11 @@ from src.models import Requirement
 
 PROMPT_MAP = {
     ("capella", "operational_analysis"): "generate_capella_oa.txt",
-    ("capella", "system_analysis"): "generate_capella_sa.txt",
+    ("capella", "system_needs_analysis"): "generate_capella_sa.txt",
+    ("capella", "system_analysis"): "generate_capella_sa.txt",  # backward compat
     ("capella", "logical_architecture"): "generate_capella_la.txt",
     ("capella", "physical_architecture"): "generate_capella_pa.txt",
+    ("capella", "epbs"): "generate_capella_epbs.txt",
     ("rhapsody", "requirements_diagram"): "generate_rhapsody_req.txt",
     ("rhapsody", "block_definition"): "generate_rhapsody_bdd.txt",
     ("rhapsody", "internal_block"): "generate_rhapsody_ibd.txt",

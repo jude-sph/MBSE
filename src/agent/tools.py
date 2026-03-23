@@ -25,8 +25,8 @@ TOOL_DEFINITIONS: list[dict] = [
                         "type": "string",
                         "description": (
                             "The layer key, e.g. 'operational_analysis', "
-                            "'system_analysis', 'logical_architecture', 'physical_architecture', "
-                            "or a Rhapsody diagram key."
+                            "'system_needs_analysis', 'logical_architecture', 'physical_architecture', "
+                            "'epbs', or a Rhapsody diagram key."
                         ),
                     },
                     "collection": {

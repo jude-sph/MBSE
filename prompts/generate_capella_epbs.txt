@@ -1,0 +1,10 @@
+Generate an End-Product Breakdown Structure (EPBS) for the Capella model based on the following requirements.
+
+Requirements:
+{requirements}
+
+{existing_elements}
+
+Return a JSON object with the following structure:
+- configuration_items: list of configuration items, each with id, name, type (HW/SW/FW/DATA/SERVICE), description, and physical_component_refs
+- pbs_structure: list of PBS nodes, each with id, name, parent_id (null for root), children_ids, and ci_ref

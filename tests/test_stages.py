@@ -156,6 +156,22 @@ def test_generate_without_existing_elements_still_works(sample_requirements):
     assert "entities" in result
 
 
+def test_generate_epbs_returns_valid_structure(sample_requirements):
+    mock_response = {
+        "configuration_items": [
+            {"id": "CI-001", "name": "Engine Control Unit", "type": "HW", "description": "Main controller", "physical_component_refs": ["PC-001"]}
+        ],
+        "pbs_structure": [
+            {"id": "PBS-001", "name": "Propulsion System", "parent_id": None, "children_ids": [], "ci_ref": "CI-001"}
+        ],
+    }
+    tracker = CostTracker(model="test-model")
+    with patch("src.stages.generate.call_llm", return_value=mock_response):
+        result = generate_layer("capella", "epbs", sample_requirements, tracker)
+    assert "configuration_items" in result
+    assert result["configuration_items"][0]["type"] == "HW"
+
+
 def test_link_with_existing_links(sample_requirements):
     elements = {"operational_analysis": {"activities": [{"id": "OA-005", "name": "New Activity"}]}}
     existing_links = [{"id": "LNK-001", "source": "OA-001", "target": "REQ-001", "type": "satisfies", "description": "existing"}]
