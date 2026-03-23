@@ -1,0 +1,22 @@
+# src/stages/link.py
+import json
+from src.config import PROMPTS_DIR
+from src.cost_tracker import CostTracker
+from src.llm_client import call_llm
+from src.models import Requirement
+
+
+def generate_links(mode: str, layers: dict, requirements: list[Requirement], tracker: CostTracker, client=None) -> dict:
+    """Stage 4: Generate cross-element links. Returns {links: [...]}."""
+    template = (PROMPTS_DIR / "link.txt").read_text()
+    reqs_json = json.dumps([r.model_dump() for r in requirements], indent=2)
+    layers_json = json.dumps(layers, indent=2)
+
+    # Select valid link types based on mode
+    if mode == "capella":
+        link_types = "satisfies, realizes, implements, involves, exchanges"
+    else:
+        link_types = "deriveReqt, satisfy, refine, trace, allocate"
+
+    prompt = template.format(requirements=reqs_json, layers=layers_json, link_types=link_types, mode=mode)
+    return call_llm(prompt=prompt, cost_tracker=tracker, call_type="link", stage="link", client=client)

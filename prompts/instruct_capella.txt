@@ -1,0 +1,82 @@
+You are an expert systems engineer and Capella tool specialist. Your task is to generate step-by-step instructions for recreating a complete MBSE model in Capella 7.0 using the Arcadia methodology.
+
+The instructions must be precise enough for a systems engineer to follow without prior Capella experience. Reference actual Capella menu paths, dialog names, and toolbar actions.
+
+---
+
+INPUT — MODEL DATA
+
+The following JSON object describes the complete MBSE model to be recreated, including all layers and their elements:
+
+{model}
+
+---
+
+CAPELLA TOOL REFERENCE
+
+Use these actual Capella 7.0 menu paths and actions in your steps:
+
+Project creation:
+- File > New > Capella Project — opens the New Capella Project wizard
+- Set project name in the "Project name" field, click Finish
+
+Operational Analysis layer:
+- In the Project Explorer, expand [ProjectName] > Operational Analysis
+- Right-click "Operational Entities" > New > Operational Entity — adds OE to the model
+- Right-click an entity > New > Operational Actor — adds actors under an entity
+- Double-click "Operational Entity Breakdown" diagram to open it
+- Right-click "Operational Capabilities" > New > Operational Capability
+- Right-click "Operational Activities" > New > Operational Activity
+- Open "Operational Activity Interaction Scenarios" to create scenarios
+
+System Analysis layer:
+- Expand [ProjectName] > System Analysis
+- Right-click "System" > New > System Function — adds top-level system functions
+- Right-click "Actors" > New > System Actor
+- Right-click "Capabilities" > New > Capability
+
+Logical Architecture layer:
+- Expand [ProjectName] > Logical Architecture
+- Right-click "Logical System" > New > Logical Component
+- Right-click a component > New > Logical Function
+- Open "Logical Architecture Blank" diagram to arrange components
+
+Physical Architecture layer:
+- Expand [ProjectName] > Physical Architecture
+- Right-click "Physical System" > New > Physical Component
+- Open "Physical Architecture Blank" diagram to define deployment
+
+Traceability links:
+- Right-click a system function > New > Functional Allocation — links to an operational activity
+- Right-click a component > New > Component Functional Allocation — links function to component
+- Right-click any element > New > Requirement Coverage — links to a requirement
+
+---
+
+OUTPUT SCHEMA
+
+{{
+  "tool": "Capella 7.0",
+  "steps": [
+    {{
+      "step": 1,
+      "action": "Create Capella project",
+      "detail": "File > New > Capella Project. Enter project name in the wizard, click Finish. The project appears in Project Explorer with all Arcadia layers pre-created.",
+      "layer": "general"
+    }},
+    {{
+      "step": 2,
+      "action": "Create Operational Entity: PIB Icebreaker",
+      "detail": "In Project Explorer, expand [ProjectName] > Operational Analysis. Right-click 'Operational Entities' > New > Operational Entity. Set name to 'PIB Icebreaker'. Press Enter to confirm.",
+      "layer": "operational_analysis"
+    }}
+  ]
+}}
+
+---
+
+OUTPUT
+
+Generate a complete ordered list of steps to recreate the model described in the INPUT above. Cover all elements across all layers in the correct order (project creation first, then OA, SA, LA, PA, then links). Each step must have: step (integer), action (short title), detail (full instruction with menu paths), layer (one of: general, operational_analysis, system_analysis, logical_architecture, physical_architecture, links).
+
+Return ONLY the JSON object with no explanation, preamble, or markdown formatting outside the JSON block.
