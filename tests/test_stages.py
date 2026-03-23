@@ -154,3 +154,13 @@ def test_generate_without_existing_elements_still_works(sample_requirements):
     with patch("src.stages.generate.call_llm", return_value=mock_response):
         result = generate_layer("capella", "operational_analysis", sample_requirements, tracker)
     assert "entities" in result
+
+
+def test_link_with_existing_links(sample_requirements):
+    elements = {"operational_analysis": {"activities": [{"id": "OA-005", "name": "New Activity"}]}}
+    existing_links = [{"id": "LNK-001", "source": "OA-001", "target": "REQ-001", "type": "satisfies", "description": "existing"}]
+    mock_response = {"links": [{"id": "LNK-010", "source": "OA-005", "target": "REQ-SAR-007", "type": "satisfies", "description": "new"}]}
+    tracker = CostTracker(model="test-model")
+    with patch("src.stages.link.call_llm", return_value=mock_response):
+        result = generate_links("capella", elements, sample_requirements, tracker, existing_links=existing_links)
+    assert result["links"][0]["id"] == "LNK-010"

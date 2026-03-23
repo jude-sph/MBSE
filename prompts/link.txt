@@ -10,6 +10,10 @@ VALID LINK TYPES FOR THIS MODE
 
 ---
 
+{existing_links}
+
+---
+
 INPUT — REQUIREMENTS
 
 The following requirements are provided as a JSON array. Each object has fields: id, text, source_dig.
