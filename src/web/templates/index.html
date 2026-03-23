@@ -15,6 +15,7 @@
             <span class="version">v{{ version }}</span>
         </div>
         <div class="header-right">
+            <button class="btn-icon" id="clear-session-btn" onclick="clearSession()" title="Clear saved session" style="display:none">Clear Session</button>
             <button class="btn-icon" id="settings-btn" onclick="openSettings()" title="Settings">&#9881; Settings</button>
             <button class="btn-update" id="update-btn" onclick="checkAndUpdate()">Update</button>
         </div>
@@ -76,6 +77,17 @@
                 </div>
             </div>
 
+            <!-- Requirement Preview -->
+            <div class="panel-section" id="req-preview-section" style="display:none">
+                <div class="section-label">Loaded Requirements</div>
+                <div class="req-preview-controls">
+                    <button id="req-select-all" onclick="reqSelectAll()">Select All</button>
+                    <button id="req-deselect-all" onclick="reqDeselectAll()">Deselect All</button>
+                    <span id="req-selected-count"></span>
+                </div>
+                <div id="req-preview-list" class="req-preview-list"></div>
+            </div>
+
             <!-- LLM Provider -->
             <div class="panel-section" id="provider-section">
                 <div class="section-label">LLM Provider</div>
@@ -97,6 +109,9 @@
 
         <!-- Right Panel -->
         <section id="right-panel">
+
+            <!-- Coverage Indicator -->
+            <div id="coverage-indicator" class="coverage-indicator" style="display:none"></div>
 
             <!-- Tab Bar -->
             <div id="tab-bar" class="tab-bar">
