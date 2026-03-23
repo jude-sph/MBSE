@@ -1,0 +1,4 @@
+id,text,source_dig
+REQ-SAR-001,"The crew shall monitor GMDSS frequencies (VHF Ch 16/70, MF 2182 kHz).",DIG-5967
+REQ-SAR-004,The vessel shall maintain station within a 10-meter radius of a fixed geographical position for short durations.,DIG-5967
+REQ-SAR-007,The vessel shall support the safe launch and recovery of the Fast Rescue Craft (FRC) from the davit.,DIG-5967
