@@ -1076,35 +1076,83 @@ function renderInstructionsTab() {
     var list = document.getElementById('instructions-list');
     if (!list) return;
     clearChildren(list);
+    list.className = 'instructions-container';
 
     if (!currentModel || !currentModel.instructions) {
-        list.appendChild(el('li', { textContent: 'No instructions available.' }));
+        list.appendChild(el('div', { className: 'empty-state', textContent: 'No instructions available.' }));
         return;
     }
 
     var steps = currentModel.instructions.steps || [];
+    var toolName = currentModel.instructions.tool || '';
+
     if (steps.length === 0) {
-        list.appendChild(el('li', { textContent: 'No steps generated.' }));
+        list.appendChild(el('div', { className: 'empty-state', textContent: 'No steps generated.' }));
         return;
     }
 
-    steps.forEach(function (step) {
-        var li = document.createElement('li');
-        li.className = 'instruction-step';
+    // Header with tool name and copy-all button
+    var header = el('div', { className: 'instructions-header' });
+    if (toolName) {
+        header.appendChild(el('span', { className: 'instructions-tool', textContent: toolName }));
+    }
+    header.appendChild(el('span', { className: 'instructions-count', textContent: steps.length + ' steps' }));
+    var copyAllBtn = el('button', { className: 'btn-copy-all', textContent: 'Copy All' });
+    copyAllBtn.addEventListener('click', function() {
+        var allText = steps.map(function(s) {
+            return 'Step ' + (s.step || '') + ': ' + (s.action || '') + '\n' + (s.detail || '');
+        }).join('\n\n');
+        copyToClipboard(allText);
+    });
+    header.appendChild(copyAllBtn);
+    list.appendChild(header);
 
-        li.appendChild(el('strong', { textContent: step.action || '' }));
-        li.appendChild(document.createTextNode(step.detail ? ' \u2014 ' + step.detail : ''));
-
-        if (step.layer) {
-            li.appendChild(el('span', { className: 'step-layer-tag', textContent: step.layer }));
+    // Group steps by layer
+    var layerGroups = {};
+    var layerOrder = [];
+    steps.forEach(function(step) {
+        var layer = step.layer || 'general';
+        if (!layerGroups[layer]) {
+            layerGroups[layer] = [];
+            layerOrder.push(layer);
         }
+        layerGroups[layer].push(step);
+    });
 
-        var stepText = (step.action || '') + (step.detail ? ': ' + step.detail : '');
-        var copyBtn = el('button', { className: 'btn-copy', title: 'Copy step', textContent: '\u29c9' });
-        copyBtn.addEventListener('click', function () { copyToClipboard(stepText); });
-        li.appendChild(copyBtn);
+    layerOrder.forEach(function(layer) {
+        var layerDisplay = layer.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
 
-        list.appendChild(li);
+        var section = el('div', { className: 'instructions-layer-section' });
+        var layerHeader = el('div', { className: 'instructions-layer-header' });
+        layerHeader.appendChild(el('span', { className: 'instructions-layer-name', textContent: layerDisplay }));
+        layerHeader.appendChild(el('span', { className: 'instructions-layer-count', textContent: layerGroups[layer].length + ' steps' }));
+        section.appendChild(layerHeader);
+
+        layerGroups[layer].forEach(function(step) {
+            var card = el('div', { className: 'instruction-card' });
+
+            var cardHeader = el('div', { className: 'instruction-card-header' });
+            var stepNum = el('span', { className: 'instruction-step-num', textContent: step.step || '?' });
+            var action = el('span', { className: 'instruction-action', textContent: step.action || '' });
+            var copyBtn = el('button', { className: 'instruction-copy', title: 'Copy step', textContent: '\u2398' });
+            copyBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                copyToClipboard((step.action || '') + ': ' + (step.detail || ''));
+            });
+            cardHeader.appendChild(stepNum);
+            cardHeader.appendChild(action);
+            cardHeader.appendChild(copyBtn);
+            card.appendChild(cardHeader);
+
+            if (step.detail) {
+                var detail = el('div', { className: 'instruction-detail', textContent: step.detail });
+                card.appendChild(detail);
+            }
+
+            section.appendChild(card);
+        });
+
+        list.appendChild(section);
     });
 }
 
