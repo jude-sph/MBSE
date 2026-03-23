@@ -765,11 +765,11 @@ function switchTab(tabName) {
     });
 
     document.querySelectorAll('.tab-pane').forEach(function (pane) {
-        pane.style.display = 'none';
+        pane.classList.remove('active');
     });
 
     var activePane = document.getElementById('tab-' + tabName);
-    if (activePane) activePane.style.display = '';
+    if (activePane) activePane.classList.add('active');
 
     if (tabName === 'links') renderLinksTab();
     if (tabName === 'instructions') renderInstructionsTab();
