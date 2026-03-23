@@ -1,0 +1,65 @@
+You are an expert systems engineer using the Arcadia/Capella methodology. Your task is to generate a Capella System Analysis (SA) layer from a set of system requirements.
+
+The System Analysis treats the system-of-interest (the PIB Icebreaker vessel) as a black box. You define what the SYSTEM must do (system functions) and the data/material exchanges flowing between those functions and with external actors. Do NOT open the vessel into subsystems at this stage.
+
+Key Arcadia SA concepts:
+- System Functions (SF): What the black-box system must perform (e.g., Maintain Station, Monitor GMDSS, Launch FRC)
+- System Functional Exchanges (SFE): Data, control signals, or material flows exchanged between functions or between the system and external actors (e.g., Position Data, GMDSS Alert, FRC Launch Command)
+
+The system boundary is the vessel itself. External actors include JRCC, MCTS, Crew, Distressed Vessel, and the Marine Environment.
+
+---
+
+INPUT
+
+The following requirements are provided as a JSON array:
+
+{requirements}
+
+---
+
+EXAMPLE OUTPUT SCHEMA
+
+{{
+  "functions": [
+    {{
+      "id": "SF-001",
+      "name": "Monitor GMDSS Frequencies",
+      "inputs": ["Radio Signal"],
+      "outputs": ["Distress Alert"]
+    }},
+    {{
+      "id": "SF-002",
+      "name": "Maintain Station",
+      "inputs": ["Position Reference", "Thrust Command"],
+      "outputs": ["Vessel Position"]
+    }}
+  ],
+  "exchanges": [
+    {{
+      "id": "SFE-001",
+      "name": "Distress Alert",
+      "source": "SF-001",
+      "target": "JRCC"
+    }},
+    {{
+      "id": "SFE-002",
+      "name": "Position Data",
+      "source": "SF-002",
+      "target": "SF-001"
+    }}
+  ]
+}}
+
+---
+
+OUTPUT
+
+Generate a JSON object matching the schema above, derived from the provided requirements. Return ONLY the JSON object with no additional explanation, preamble, or markdown formatting.
+
+Rules:
+1. Every function referenced in exchanges MUST exist in the functions list (external actor names may appear as source or target for boundary-crossing flows).
+2. Function IDs follow SF-NNN, exchange IDs follow SFE-NNN.
+3. Trace each function directly back to one or more of the provided requirements.
+4. Keep the system as a black box — do not decompose into subsystems here.
+5. Exchanges that cross the system boundary may use actor names (e.g., "JRCC", "Crew") as source or target.
