@@ -8,7 +8,7 @@ from typing import Callable
 from src.config import MODEL_PRICING
 from src.cost_tracker import CostTracker
 from src.llm_client import call_llm, create_client
-from src.models import MBSEModel, Meta, Requirement, Link
+from src.models import MBSEModel, Meta, Requirement, Link, ProjectModel, BatchRecord
 from src.stages.analyze import analyze_requirements
 from src.stages.clarify import apply_clarifications
 from src.stages.generate import generate_layer
@@ -91,6 +91,96 @@ def estimate_cost(requirements: list[Requirement], mode: str, selected_layers: l
     }
 
 
+def fix_id_collisions(new_elements: list[dict], existing_ids: set[str]) -> list[dict]:
+    """Rename new element IDs that collide with existing ones."""
+    import re
+    used_ids = set(existing_ids)
+    for elem in new_elements:
+        eid = elem.get("id", "")
+        if eid in used_ids:
+            # Extract prefix and number, increment until unique
+            match = re.match(r'^(.*?)(\d+)$', eid)
+            if match:
+                prefix, num = match.group(1), int(match.group(2))
+                while f"{prefix}{num}" in used_ids:
+                    num += 1
+                elem["id"] = f"{prefix}{num}"
+            else:
+                elem["id"] = f"{eid}-dup"
+        used_ids.add(elem["id"])
+    return new_elements
+
+
+def _collect_all_ids(layers: dict) -> set[str]:
+    """Collect all element IDs from all layers."""
+    ids = set()
+    for layer_data in layers.values():
+        if isinstance(layer_data, dict):
+            for elements in layer_data.values():
+                if isinstance(elements, list):
+                    for elem in elements:
+                        if isinstance(elem, dict) and "id" in elem:
+                            ids.add(elem["id"])
+    return ids
+
+
+def merge_batch_into_project(
+    project: ProjectModel,
+    new_requirements: list[Requirement],
+    new_layers: dict,
+    new_links: list[Link],
+    new_instructions: dict,
+    source_file: str,
+    layers_generated: list[str],
+    model_name: str,
+    cost: float,
+) -> None:
+    """Merge pipeline output into the project model. Mutates project in place."""
+    # 1. Collect all existing element IDs
+    existing_ids = _collect_all_ids(project.layers)
+
+    # 2. Fix ID collisions in new layers
+    for layer_key, layer_data in new_layers.items():
+        if isinstance(layer_data, dict):
+            for collection_key, elements in layer_data.items():
+                if isinstance(elements, list):
+                    fix_id_collisions(elements, existing_ids)
+                    # Add new IDs to existing set
+                    for e in elements:
+                        if isinstance(e, dict) and "id" in e:
+                            existing_ids.add(e["id"])
+
+    # 3. Append new elements to existing layers
+    for layer_key, layer_data in new_layers.items():
+        if layer_key not in project.layers:
+            project.layers[layer_key] = {}
+        if isinstance(layer_data, dict):
+            for collection_key, elements in layer_data.items():
+                if collection_key not in project.layers[layer_key]:
+                    project.layers[layer_key][collection_key] = []
+                project.layers[layer_key][collection_key].extend(elements)
+
+    # 4. Append requirements
+    project.requirements.extend(new_requirements)
+
+    # 5. Append links
+    project.links.extend(new_links)
+
+    # 6. Replace instructions (regenerated for full model)
+    project.instructions = new_instructions
+
+    # 7. Add batch record
+    batch_num = len(project.batches) + 1
+    project.batches.append(BatchRecord(
+        id=f"batch-{batch_num:03d}",
+        source_file=source_file,
+        requirement_ids=[r.id for r in new_requirements],
+        layers_generated=layers_generated,
+        model=model_name,
+        cost=cost,
+    ))
+
+
 def run_pipeline(
     requirements: list[Requirement],
     mode: str,
@@ -100,6 +190,7 @@ def run_pipeline(
     clarifications: dict[str, str] | None = None,
     emit: Callable[[dict], None] | None = None,
     cost_log_path: Path | None = None,
+    existing_model: ProjectModel | None = None,
 ) -> MBSEModel:
     """Run the full 5-stage pipeline. Returns an MBSEModel.
 
@@ -128,8 +219,9 @@ def run_pipeline(
     layers = {}
     for i, layer_key in enumerate(selected_layers, 1):
         _emit({"stage": "generate", "status": "running", "detail": f"Generating {layer_key} ({i}/{len(selected_layers)})...", "cost": tracker.format_cost_line()})
+        existing_elements = existing_model.layers.get(layer_key) if existing_model else None
         layers[layer_key] = _run_with_retry(
-            lambda lk=layer_key: generate_layer(mode, lk, requirements, tracker, client=client),
+            lambda lk=layer_key, ee=existing_elements: generate_layer(mode, lk, requirements, tracker, client=client, existing_elements=ee),
             "generate", _emit,
         )
         _emit({"stage": "generate", "status": "layer_complete", "detail": f"{layer_key} complete", "cost": tracker.format_cost_line()})
@@ -138,17 +230,25 @@ def run_pipeline(
 
     # Stage 4: Link
     _emit({"stage": "link", "status": "running", "detail": "Generating cross-element links...", "cost": tracker.format_cost_line()})
+    existing_links_payload = [l.model_dump() for l in existing_model.links] if existing_model else None
     link_result = _run_with_retry(
-        lambda: generate_links(mode, layers, requirements, tracker, client=client),
+        lambda: generate_links(mode, layers, requirements, tracker, client=client, existing_links=existing_links_payload),
         "link", _emit,
     )
     links = [Link(**l) for l in link_result.get("links", [])]
     _emit({"stage": "link", "status": "complete", "detail": f"{len(links)} links created", "cost": tracker.format_cost_line()})
 
-    # Stage 5: Instruct
+    # Stage 5: Instruct — use the full accumulated model when an existing_model is provided
     _emit({"stage": "instruct", "status": "running", "detail": "Generating recreation instructions...", "cost": tracker.format_cost_line()})
+    if existing_model:
+        # Build the full merged layer view: existing layers + newly generated layers
+        full_layers = dict(existing_model.layers)
+        full_layers.update(layers)
+        instruct_model_data = {"layers": full_layers}
+    else:
+        instruct_model_data = {"layers": layers}
     instructions = _run_with_retry(
-        lambda: generate_instructions(mode, {"layers": layers}, tracker, client=client, emit=_emit),
+        lambda: generate_instructions(mode, instruct_model_data, tracker, client=client, emit=_emit),
         "instruct", _emit,
     )
     _emit({"stage": "instruct", "status": "complete", "detail": "Instructions generated", "cost": tracker.format_cost_line()})
