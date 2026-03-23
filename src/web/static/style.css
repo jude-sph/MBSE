@@ -1057,16 +1057,123 @@ body {
 .links-table tr:last-child td { border-bottom: none; }
 .links-table tbody tr:hover td { background: #111128; }
 
-/* Instructions list */
-.instructions-list { padding-left: 20px; }
-.instructions-list li {
-    padding: 6px 0;
-    font-size: 13px;
-    color: #ccc;
-    line-height: 1.5;
-    border-bottom: 1px solid #1e1e3a;
+/* Instructions */
+.instructions-container { display: flex; flex-direction: column; gap: 6px; }
+
+.instructions-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #111128;
+    border: 1px solid #1e1e3a;
+    border-radius: 8px;
+    margin-bottom: 4px;
 }
-.instructions-list li:last-child { border-bottom: none; }
+
+.instructions-tool {
+    color: #7c7cff;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.instructions-count {
+    color: #555;
+    font-size: 11px;
+    margin-left: auto;
+}
+
+.btn-copy-all {
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    color: #888;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.btn-copy-all:hover { border-color: #7c7cff; color: #7c7cff; }
+
+.instructions-layer-section {
+    margin-bottom: 8px;
+}
+
+.instructions-layer-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    margin-bottom: 4px;
+}
+
+.instructions-layer-name {
+    color: #7c7cff;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.instructions-layer-count {
+    color: #444;
+    font-size: 10px;
+}
+
+.instruction-card {
+    background: #0f0f1e;
+    border: 1px solid #1a1a2e;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 4px;
+    transition: border-color 0.15s;
+}
+.instruction-card:hover { border-color: #2a2a4a; }
+
+.instruction-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.instruction-step-num {
+    color: #555;
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 10px;
+    background: #0a0a14;
+    padding: 2px 6px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    min-width: 24px;
+    text-align: center;
+}
+
+.instruction-action {
+    color: #e2e8f0;
+    font-size: 13px;
+    font-weight: 500;
+    flex: 1;
+}
+
+.instruction-copy {
+    background: none;
+    border: none;
+    color: #333;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition: all 0.15s;
+    opacity: 0;
+}
+.instruction-card:hover .instruction-copy { opacity: 1; }
+.instruction-copy:hover { color: #7c7cff; background: #1a1a2e; }
+
+.instruction-detail {
+    color: #999;
+    font-size: 12px;
+    line-height: 1.5;
+    margin-top: 6px;
+    padding-left: 38px;
+}
 
 /* JSON output */
 .json-output {
