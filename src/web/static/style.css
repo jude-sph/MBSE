@@ -1030,7 +1030,8 @@ body {
 /* Modal size variants */
 .modal-settings { max-width: 520px; }
 .modal-cost     { max-width: 420px; }
-.modal-clarify  { max-width: 580px; }
+.modal-clarify  { max-width: 580px; max-height: 85vh; display: flex; flex-direction: column; }
+.modal-clarify .modal-body { overflow-y: auto; flex: 1; min-height: 0; }
 
 /* Error popup modal */
 .modal-overlay {
