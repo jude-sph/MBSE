@@ -1911,6 +1911,35 @@ function renderCoverageIndicator() {
     indicator.appendChild(label);
     indicator.appendChild(stats);
     indicator.appendChild(barTrack);
+
+    // Show uncovered requirements as clickable list
+    var uncovered = currentModel.requirements.filter(function(req) {
+        return !linkedReqIds.has(req.id);
+    });
+
+    if (uncovered.length > 0) {
+        var toggle = el('button', { className: 'coverage-toggle', textContent: uncovered.length + ' uncovered \u25be' });
+        var detailsDiv = el('div', { className: 'coverage-details', style: 'display:none' });
+
+        uncovered.forEach(function(req) {
+            var row = el('div', { className: 'coverage-uncovered-row' });
+            var idSpan = el('span', { className: 'coverage-uncovered-id', textContent: req.id });
+            var textSpan = el('span', { className: 'coverage-uncovered-text', textContent: req.text });
+            textSpan.title = req.text;
+            row.appendChild(idSpan);
+            row.appendChild(textSpan);
+            detailsDiv.appendChild(row);
+        });
+
+        toggle.addEventListener('click', function() {
+            var showing = detailsDiv.style.display !== 'none';
+            detailsDiv.style.display = showing ? 'none' : '';
+            toggle.textContent = uncovered.length + ' uncovered ' + (showing ? '\u25be' : '\u25b4');
+        });
+
+        indicator.appendChild(toggle);
+        indicator.appendChild(detailsDiv);
+    }
 }
 
 // =============================================================================
