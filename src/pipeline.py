@@ -148,7 +148,7 @@ def run_pipeline(
     # Stage 5: Instruct
     _emit({"stage": "instruct", "status": "running", "detail": "Generating recreation instructions...", "cost": tracker.format_cost_line()})
     instructions = _run_with_retry(
-        lambda: generate_instructions(mode, {"layers": layers}, tracker, client=client),
+        lambda: generate_instructions(mode, {"layers": layers}, tracker, client=client, emit=_emit),
         "instruct", _emit,
     )
     _emit({"stage": "instruct", "status": "complete", "detail": "Instructions generated", "cost": tracker.format_cost_line()})
