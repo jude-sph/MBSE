@@ -76,6 +76,9 @@ document.addEventListener('DOMContentLoaded', function () {
     // Check for updates quietly on page load
     checkUpdatesQuietly();
 
+    // Initialize chat resize
+    initChatResize();
+
     // Project-based restore
     if (INITIAL_PROJECT && INITIAL_PROJECT.project) {
         currentModel = INITIAL_PROJECT;
@@ -369,15 +372,18 @@ function reqDeselectAll() {
 
 function initProvider() {
     var provider = (CURRENT_SETTINGS && CURRENT_SETTINGS.provider) || 'anthropic';
-    setProvider(provider);
+    // Map anthropic/openrouter to 'api' for the simplified toggle
+    var uiProvider = (provider === 'local') ? 'local' : 'api';
+    setProvider(uiProvider);
 }
 
-function setProvider(provider) {
+function setProvider(uiProvider) {
     document.querySelectorAll('#provider-selector .segment').forEach(function (btn) {
-        btn.classList.toggle('active', btn.getAttribute('data-provider') === provider);
+        btn.classList.toggle('active', btn.getAttribute('data-provider') === uiProvider);
     });
+    // Store the UI choice; gatherSettings resolves 'api' to the actual provider
     if (typeof CURRENT_SETTINGS !== 'undefined') {
-        CURRENT_SETTINGS.provider = provider;
+        CURRENT_SETTINGS._uiProvider = uiProvider;
     }
 }
 
@@ -423,7 +429,11 @@ async function startGenerate() {
 }
 
 function gatherSettings() {
-    var provider = (CURRENT_SETTINGS && CURRENT_SETTINGS.provider) || 'anthropic';
+    var uiProvider = (CURRENT_SETTINGS && CURRENT_SETTINGS._uiProvider) || 'api';
+    var configuredProvider = (CURRENT_SETTINGS && CURRENT_SETTINGS.provider) || 'anthropic';
+    // 'api' resolves to whatever is configured in settings (anthropic or openrouter)
+    var provider = (uiProvider === 'local') ? 'local' : configuredProvider;
+
     var model = (CURRENT_SETTINGS && CURRENT_SETTINGS.model) || 'claude-sonnet-4-6';
 
     var modelSelect = document.getElementById('settings-model');
@@ -1391,6 +1401,7 @@ async function sendChat() {
     if (!message) return;
 
     input.value = '';
+    input.style.height = 'auto';
     appendChatMessage('user', message);
 
     var sendBtn = document.querySelector('.btn-send');
@@ -1438,13 +1449,75 @@ async function sendChat() {
 
 function appendChatMessage(role, text, isLoading) {
     var history = document.getElementById('chat-history');
-    var msg = el('div', {
+    var wrapper = el('div', {
         className: 'chat-message chat-' + role + (isLoading ? ' chat-loading' : ''),
-        textContent: text,
     });
-    history.appendChild(msg);
+
+    var label = el('div', { className: 'chat-msg-label', textContent: role === 'user' ? 'You' : 'Agent' });
+    wrapper.appendChild(label);
+
+    var body = el('div', { className: 'chat-msg-body' });
+    if (role === 'agent' && !isLoading) {
+        body.innerHTML = renderMarkdown(text);
+    } else {
+        body.textContent = text;
+    }
+    wrapper.appendChild(body);
+
+    history.appendChild(wrapper);
     history.scrollTop = history.scrollHeight;
-    return msg;
+    return wrapper;
+}
+
+function renderMarkdown(text) {
+    // Simple markdown renderer (no external dependencies)
+    var html = text
+        // Escape HTML
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        // Code blocks
+        .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+        // Inline code
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        // Bold
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        // Italic
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        // Unordered lists
+        .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+        // Wrap consecutive <li> in <ul>
+        .replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
+        // Paragraphs (double newline)
+        .replace(/\n\n/g, '</p><p>')
+        // Single newlines to <br> (except inside pre/code)
+        .replace(/\n/g, '<br>');
+    return '<p>' + html + '</p>';
+}
+
+function initChatResize() {
+    var panel = document.getElementById('chat-panel');
+    var handle = document.getElementById('chat-resize-handle');
+    if (!handle || !panel) return;
+
+    var startY, startHeight;
+
+    handle.addEventListener('mousedown', function(e) {
+        startY = e.clientY;
+        startHeight = panel.offsetHeight;
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        e.preventDefault();
+    });
+
+    function onMouseMove(e) {
+        var delta = startY - e.clientY;
+        var newHeight = Math.max(120, Math.min(window.innerHeight * 0.7, startHeight + delta));
+        panel.style.height = newHeight + 'px';
+    }
+
+    function onMouseUp() {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+    }
 }
 
 // =============================================================================
