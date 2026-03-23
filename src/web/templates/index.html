@@ -97,10 +97,10 @@
             <div class="panel-section" id="provider-section">
                 <div class="section-label">LLM Provider</div>
                 <div id="provider-selector" class="segment-control">
-                    <button class="segment" data-provider="anthropic" onclick="setProvider('anthropic')">Anthropic</button>
-                    <button class="segment" data-provider="openrouter" onclick="setProvider('openrouter')">OpenRouter</button>
+                    <button class="segment" data-provider="api" onclick="setProvider('api')">API</button>
                     <button class="segment" data-provider="local" onclick="setProvider('local')">Local</button>
                 </div>
+                <div class="provider-hint">API uses the model selected in Settings (Anthropic or OpenRouter)</div>
             </div>
 
             <!-- Generate Button -->
@@ -194,7 +194,8 @@
             </div>
 
             <!-- Chat Agent Panel -->
-            <div id="chat-panel" class="chat-panel collapsed">
+            <div id="chat-panel" class="chat-panel collapsed" style="height: 350px;">
+                <div id="chat-resize-handle" class="chat-resize-handle"></div>
                 <div class="chat-header" onclick="toggleChat()">
                     <span class="chat-title">Chat Agent</span>
                     <span id="chat-toggle-arrow" class="chat-arrow">&#8963;</span>
@@ -204,9 +205,9 @@
                         <!-- Messages appended by app.js -->
                     </div>
                     <div class="chat-input-row">
-                        <input type="text" id="chat-input" class="chat-input"
-                               placeholder="Ask about the model..."
-                               onkeydown="if(event.key==='Enter') sendChat()">
+                        <textarea id="chat-input" class="chat-input" rows="1"
+                               placeholder="Ask the agent to modify the model..."
+                               onkeydown="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendChat(); }"></textarea>
                         <button class="btn-send" onclick="sendChat()">Send</button>
                     </div>
                 </div>
