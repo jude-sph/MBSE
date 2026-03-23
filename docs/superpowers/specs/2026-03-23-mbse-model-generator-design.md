@@ -25,8 +25,8 @@ Follows the reqdecomp project patterns:
 
 - **Backend:** Python 3.11+, FastAPI, Uvicorn, Pydantic 2.0+, openpyxl, python-dotenv, httpx
 - **Frontend:** Vanilla JavaScript (no frameworks, no build step), Jinja2 templates
-- **Real-time:** Server-Sent Events (SSE) for pipeline progress
-- **LLM:** Dual provider -- Anthropic (direct) and OpenRouter (OpenAI-compatible client)
+- **Real-time:** Server-Sent Events (SSE) via FastAPI StreamingResponse for pipeline progress
+- **LLM:** Three provider options -- Anthropic (direct), OpenRouter (OpenAI-compatible), Local LLM (Ollama/OpenAI-compatible endpoint)
 - **Deployment:** Python package with `pip install -e .`, CLI entry point `mbsegen --web`
 
 ### Project Structure
@@ -164,6 +164,48 @@ The pipeline output is a structured JSON model. Every element has a unique ID to
 }
 ```
 
+### Rhapsody/SysML Layers Structure
+
+When `mode` is `"rhapsody"`, the `layers` object uses SysML diagram types as keys:
+
+```json
+{
+  "layers": {
+    "requirements_diagram": {
+      "requirements": [
+        { "id": "REQD-001", "name": "Station Keeping", "text": "The vessel shall maintain station within 10m radius...", "priority": "high", "status": "approved", "source_req": "REQ-SAR-004" }
+      ]
+    },
+    "block_definition": {
+      "blocks": [
+        { "id": "BDD-001", "name": "PIB Icebreaker", "type": "Block", "properties": [...], "ports": [...] }
+      ]
+    },
+    "internal_block": {
+      "parts": [
+        { "id": "IBD-001", "name": "dpSystem:DynamicPositioning", "type": "Part", "block_ref": "BDD-003" }
+      ],
+      "connectors": [...]
+    },
+    "activity_diagram": {
+      "actions": [
+        { "id": "ACT-001", "name": "Maintain Station", "inputs": [...], "outputs": [...] }
+      ]
+    },
+    "sequence_diagram": {
+      "lifelines": [...],
+      "messages": [...]
+    },
+    "state_machine": {
+      "states": [...],
+      "transitions": [...]
+    }
+  }
+}
+```
+
+The UI presents Rhapsody diagram type selection as checkboxes: Requirements Diagram, BDD, IBD, Activity, Sequence, State Machine. The user selects which diagrams to generate, just as Capella users select which Arcadia layers to generate.
+
 ### Capella/Arcadia Element Types
 
 For Operational Analysis (OA):
@@ -287,9 +329,13 @@ Reuses the dual-provider architecture from the reqdecomp project.
 
 ### Providers
 
+Three provider options, matching the reqdecomp pattern plus local support:
+
 - **Anthropic (direct):** Uses the `anthropic` Python SDK. Supports Claude models directly.
 - **OpenRouter:** Uses the `openai` Python SDK pointed at `https://openrouter.ai/api/v1`. Supports all models via a single API key.
-- **Local LLM:** Uses the `openai` Python SDK pointed at a local endpoint (e.g., Ollama at `http://localhost:11434/v1`). Available for pipeline generation. Not used for the chat agent (requires tool-calling).
+- **Local LLM:** Uses the `openai` Python SDK pointed at a local endpoint (e.g., Ollama at `http://localhost:11434/v1`). Available for pipeline generation only. Not used for the chat agent (requires tool-calling capability that local models lack).
+
+The UI presents provider selection as a three-option segmented control: Anthropic | OpenRouter | Local. The chat agent always uses the configured Anthropic or OpenRouter provider regardless of the pipeline provider selection.
 
 ### Model Catalogue
 
