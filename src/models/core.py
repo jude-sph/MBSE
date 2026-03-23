@@ -75,3 +75,25 @@ class MBSEModel(BaseModel):
     layers: dict[str, Any]
     links: list[Link]
     instructions: dict
+
+
+class ProjectMeta(BaseModel):
+    name: str = "Untitled Project"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class BatchRecord(BaseModel):
+    id: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    source_file: str
+    requirement_ids: list[str]
+    layers_generated: list[str]
+    model: str
+    cost: float
+
+
+class ProjectModel(MBSEModel):
+    """Extends MBSEModel with project metadata and batch history."""
+    project: ProjectMeta = Field(default_factory=ProjectMeta)
+    batches: list[BatchRecord] = Field(default_factory=list)
