@@ -325,7 +325,7 @@ Each tool call updates the JSON model. The tree view re-renders. The agent respo
 
 ## LLM Provider Architecture
 
-Reuses the dual-provider architecture from the reqdecomp project.
+Extends the reqdecomp project's provider architecture with local LLM support.
 
 ### Providers
 
@@ -386,7 +386,7 @@ Two-panel layout:
 1. Mode toggle -- Capella/Arcadia vs Rhapsody/SysML (segmented control)
 2. Layer/diagram selection -- checkboxes for which layers to generate
 3. File upload -- drag-and-drop zone for XLSX/CSV
-4. LLM provider selector -- OpenRouter / Local LLM toggle
+4. LLM provider selector -- Anthropic / OpenRouter / Local three-way control
 5. Generate button -- green, prominent
 
 **Right panel (flex):**
