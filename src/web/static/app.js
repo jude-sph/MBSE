@@ -14,6 +14,8 @@ let uploadedFile = null;       // File object from upload
 let parsedRequirements = [];   // Requirements from server after upload
 let conversationHistory = [];  // Chat agent history
 let sseSource = null;          // EventSource for SSE
+let _stageTimers = {};         // Track start time per stage
+let _elapsedInterval = null;   // Interval for updating elapsed time display
 
 // Internal: pending settings during cost confirmation flow
 let _pendingSettings = null;
@@ -330,11 +332,13 @@ function showProgressArea(settings) {
         // Content area
         var content = el('div', { className: 'stage-content' });
 
-        // Header row: label + badge
+        // Header row: label + timer + badge
         var header = el('div', { className: 'stage-header' });
         var label = el('span', { className: 'stage-label', textContent: s.label });
+        var timer = el('span', { className: 'stage-timer', id: 'timer-' + s.key });
         var badge = el('span', { className: 'stage-badge', id: 'badge-' + s.key, textContent: 'Waiting' });
         header.appendChild(label);
+        header.appendChild(timer);
         header.appendChild(badge);
         content.appendChild(header);
 
@@ -387,7 +391,7 @@ function handlePipelineEvent(event) {
 
     if (stage === 'done') {
         if (sseSource) { sseSource.close(); sseSource = null; }
-        // Update title to show completion
+        _stopAllTimers();
         var titleEl = document.querySelector('.progress-title');
         if (titleEl) {
             clearChildren(titleEl);
@@ -402,6 +406,7 @@ function handlePipelineEvent(event) {
 
     if (stage === 'cancelled') {
         if (sseSource) { sseSource.close(); sseSource = null; }
+        _stopAllTimers();
         hideProgressArea();
         showToast('Job cancelled.', 'info');
         return;
@@ -409,6 +414,7 @@ function handlePipelineEvent(event) {
 
     if (stage === 'error') {
         if (sseSource) { sseSource.close(); sseSource = null; }
+        _stopAllTimers();
         hideProgressArea();
         showErrorPopup('Pipeline Failed', detail);
         return;
@@ -430,16 +436,30 @@ function handlePipelineEvent(event) {
 
     if (!stageRow) return;
 
+    var timer = document.getElementById('timer-' + stage);
+
     if (status === 'running') {
         stageRow.className = 'stage-row stage-running';
         if (badge) badge.textContent = 'Running';
         if (icon) icon.textContent = '';
         if (detailEl) detailEl.textContent = detail;
+        // Start elapsed timer for this stage
+        if (!_stageTimers[stage]) {
+            _stageTimers[stage] = Date.now();
+            _startElapsedUpdater();
+        }
     } else if (status === 'complete') {
         stageRow.className = 'stage-row stage-complete';
         if (badge) badge.textContent = 'Done';
         if (icon) icon.textContent = '\u2713';
         if (detailEl) detailEl.textContent = detail;
+        // Freeze the timer at final value
+        if (_stageTimers[stage] && timer) {
+            var elapsed = Math.round((Date.now() - _stageTimers[stage]) / 1000);
+            timer.textContent = _formatElapsed(elapsed);
+            timer.classList.add('timer-done');
+        }
+        delete _stageTimers[stage];
     } else if (status === 'layer_complete') {
         // Partial progress within generate stage -- keep it running
         if (detailEl) detailEl.textContent = detail;
@@ -1513,6 +1533,40 @@ function submitClarifications() {
 // =============================================================================
 // 15. TOAST NOTIFICATIONS
 // =============================================================================
+
+function _formatElapsed(seconds) {
+    if (seconds < 60) return seconds + 's';
+    var m = Math.floor(seconds / 60);
+    var s = seconds % 60;
+    return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+}
+
+function _startElapsedUpdater() {
+    if (_elapsedInterval) return; // already running
+    _elapsedInterval = setInterval(function () {
+        var anyRunning = false;
+        Object.keys(_stageTimers).forEach(function (stage) {
+            var timer = document.getElementById('timer-' + stage);
+            if (timer) {
+                var elapsed = Math.round((Date.now() - _stageTimers[stage]) / 1000);
+                timer.textContent = _formatElapsed(elapsed);
+                anyRunning = true;
+            }
+        });
+        if (!anyRunning) {
+            clearInterval(_elapsedInterval);
+            _elapsedInterval = null;
+        }
+    }, 1000);
+}
+
+function _stopAllTimers() {
+    _stageTimers = {};
+    if (_elapsedInterval) {
+        clearInterval(_elapsedInterval);
+        _elapsedInterval = null;
+    }
+}
 
 function showToast(message, type) {
     type = type || 'info';

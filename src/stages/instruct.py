@@ -8,12 +8,13 @@ from src.llm_client import call_llm
 logger = logging.getLogger(__name__)
 
 
-def generate_instructions(mode: str, model_data: dict, tracker: CostTracker, client=None) -> dict:
+def generate_instructions(mode: str, model_data: dict, tracker: CostTracker, client=None, emit=None) -> dict:
     """Stage 5: Generate tool-specific recreation instructions. Returns {tool: ..., steps: [...]}.
 
     For large models, generates instructions per layer and merges them to avoid
     exceeding the LLM's output token limit.
     """
+    _emit = emit or (lambda e: None)
     prompt_file = "instruct_capella.txt" if mode == "capella" else "instruct_rhapsody.txt"
     template = (PROMPTS_DIR / prompt_file).read_text()
     tool_name = "Capella 7.0" if mode == "capella" else "IBM Rhapsody 10.0"
@@ -51,7 +52,11 @@ def generate_instructions(mode: str, model_data: dict, tracker: CostTracker, cli
         step_num += 1
 
     # Then: per-layer instructions
-    for layer_key, layer_data in layers.items():
+    layer_keys = list(layers.keys())
+    total_layers = len(layer_keys)
+    for li, layer_key in enumerate(layer_keys, 1):
+        _emit({"stage": "instruct", "status": "running", "detail": f"Writing steps for {layer_key} ({li}/{total_layers})..."})
+        layer_data = layers[layer_key]
         single_layer = {"layers": {layer_key: layer_data}}
         layer_json = json.dumps(single_layer, indent=2)
         prompt = template.format(model=layer_json)
